@@ -1,0 +1,33 @@
+name: 脉脉和12306
+desc: 去开屏广告
+author: JackLiu
+update: 2024-04-02 10:55
+icon: https://github.com/zxlie/mmspider/blob/master/icon.png
+
+url_rewrites:
+- match: ^https:\/\/h3\.open\.taou\.com\/maimai\/adshow
+  location: reject
+  status_code: 302
+- match: ^https?:\/\/track\.mm\.taou\.com/v\d\/track
+  location: reject
+  status_code: 302
+- match: ^https?:\/\/api\.taou\.com\/sdk\/global\/splash_ad
+  location: reject
+  status_code: 302
+- match: ^https?:\/\/open\.taou\.com\/maimai\/ad?
+  location: reject
+  status_code: 302
+- match: ^https?:\/\/open\.taou\.com\/maimai\/launch_ad
+  location: reject
+  status_code: 302
+- match: ^https:\/\/ad\.12306\.cn\/ad\/ser\/getAdList
+  location: reject
+  status_code: 302
+
+mitm:
+  hostnames:
+  - h3.open.taou.com
+  - api.taou.com
+  - track.mm.taou.com
+  - ad.12306.cn
+  - open.taou.com
