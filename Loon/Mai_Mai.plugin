@@ -1,0 +1,18 @@
+#!name = 脉脉
+#!desc = 去开屏广告
+#!author = JackLiu
+#!update = 2024-04-02 10:55
+#!icon=https://github.com/zxlie/mmspider/blob/master/icon.png
+
+# ======= C ======= #
+[Rewrite]
+# 脉脉
+^https:\/\/h3\.open\.taou\.com\/maimai\/adshow reject-dict
+^https?:\/\/track\.mm\.taou\.com/v\d\/track reject-dict
+^https?:\/\/api\.taou\.com\/sdk\/global\/splash_ad reject-dict
+^https?:\/\/open\.taou\.com\/maimai\/ad? reject-dict
+^https?:\/\/open\.taou\.com\/maimai\/ reject-dict
+
+
+[Mitm]
+hostname = h3.open.taou.com,api.taou.com,track.mm.taou.com,open.taou.com
