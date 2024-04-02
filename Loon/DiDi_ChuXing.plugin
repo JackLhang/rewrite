@@ -1,0 +1,29 @@
+#!name = 滴滴出行
+#!author = 怎么肥事@ZenmoFeiShi
+#!update = 2024-03-18 20:05
+#! ps = 需要分流禁用掉 ip-cidr, 123.207.209.39/32, ip-cidr, 123.207.209.60/32
+
+[Rule]
+IP-CIDR, 123.207.209.39/32 REJECT
+IP-CIDR, 123.207.209.60/32 REJECT
+
+[Rewrite]
+^https:\/\/hd\.xiaojukeji\.com\/d reject-dict
+
+[Script]
+http-response ^https:\/\/common\.diditaxi\.com\.cn\/common\/v\d\/usercenter\/me script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除个人中心广告
+http-response ^https:\/\/daijia\.kuaidadi\.com\/gateway script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除信息流广告1
+http-response ^https:\/\/freight\.xiaojukeji\.com\/gateway script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除信息流广告2
+http-response ^https:\/\/daijia\.kuaidadi\.com:443\/gateway script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除信息流广告3
+http-response ^https:\/\/res\.xiaojukeji\.com\/resapi\/activity\/xpget script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除信息流广告4
+http-response ^https:\/\/ct\.xiaojukeji\.com\/agent\/v3\/feeds script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除信息流广告5
+http-response ^https:\/\/res\.xiaojukeji\.com\/resapi\/activity\/mget script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除信息流广告6
+http-response ^https:\/\/conf\.diditaxi\.com\.cn\/homepage\/v\d\/other\/fast script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除信息流广告7
+http-response ^https:\/\/conf\.diditaxi\.com\.cn\/dynamic\/conf script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除信息流广告8
+http-response ^https:\/\/conf\.diditaxi\.com\.cn\/homepage\/v\d\/core script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除除打车、代驾、青桔骑行和底部tap首页、出游、我的
+http-response ^https:\/\/api\.udache\.com\/gulfstream\/pre-sale\/v1\/other\/pGetSceneList script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除优惠商城
+http-response ^https:\/\/conf\.diditaxi\.com\.cn\/ota\/na\/yuantu\/infoList script-path = https://raw.githubusercontent.com/ZenmoFeiShi/Qx/main/Didichuxing.js, requires-body = true, tag = 移除顶部卡片
+
+
+[Mitm]
+hostname = hd.xiaojukeji.com, common.diditaxi.com.cn, freight.xiaojukeji.com, daijia.kuaidadi.com, ct.xiaojukeji.com, res.xiaojukeji.com, conf.diditaxi.com.cn ,api.udache.com ,123.207.209.*, 112.53.55.225,120.241.142.*,120.241.143.*,116.85.2.*,139.199.240.84

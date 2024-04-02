@@ -1,0 +1,61 @@
+name: QQ音乐去广告
+description: 过滤QQ音乐广告
+open_url: ''
+author: 可莉🅥
+homepage: https://gitlab.com/lodepuly/vpn_tool/-/tree/master/Tool/Loon/Plugin
+icon: https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/QQMusic.png
+rules:
+- domain:
+    match: adstats.tencentmusic.com
+    policy: REJECT
+- domain:
+    match: ad.tencentmusic.com
+    policy: REJECT
+- domain:
+    match: adcdn.tencentmusic.com
+    policy: REJECT
+- domain:
+    match: adcdn6.tencentmusic.com
+    policy: REJECT
+- domain:
+    match: adexpo.tencentmusic.com
+    policy: REJECT
+- domain:
+    match: adclick.tencentmusic.com
+    policy: REJECT
+- domain:
+    match: otheve.beacon.qq.com
+    policy: REJECT
+- domain:
+    match: mazu.m.qq.com
+    policy: REJECT
+- domain:
+    match: monitor.music.qq.com
+    policy: REJECT
+- domain:
+    match: stat.y.qq.com
+    policy: REJECT
+- domain:
+    match: tmead.y.qq.com
+    policy: REJECT
+- domain:
+    match: oth.str.mdt.qq.com
+    policy: REJECT
+- domain:
+    match: h.trace.qq.com
+    policy: REJECT
+- domain:
+    match: sdk.e.qq.com
+    policy: REJECT
+- domain:
+    match: p.l.qq.com
+    policy: REJECT
+- domain:
+    match: us.l.qq.com
+    policy: REJECT
+- domain:
+    match: tangram.e.qq.com
+    policy: REJECT
+- domain_suffix:
+    match: imtmp.net
+    policy: REJECT
