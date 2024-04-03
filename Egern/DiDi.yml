@@ -12,8 +12,8 @@ rules:
     no_resolve: true
 url_rewrites:
 - match: ^https:\/\/hd\.xiaojukeji\.com\/d
-  location: https://raw.githubusercontent.com/mieqq/mieqq/master/reject-dict.json
-  status_code: 307
+  location: reject
+  status_code: 302
 scriptings:
 - http_response:
     name: Didichuxing
