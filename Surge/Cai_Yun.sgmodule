@@ -1,0 +1,15 @@
+#!name=AppUnlock
+#!desc=解锁会员
+#!author=RuCu6
+#!icon=https://raw.githubusercontent.com/deezertidal/private/main/icons/caiyun.png
+#!update=2024-01-16 10:55
+#!homepage=https://raw.githubusercontent.com/RuCu6/QuanX/main/Rewrites/AppUnlock.conf
+
+[Map Local]
+# 彩云天气 //*.cyapi.cn
+^https:\/\/biz\.cyapi\.cn\/p\/v1\/entries\? data-type=text data="{}" status-code=200
+
+^https:\/\/starplucker\.cyapi\.cn\/v3\/operation\/homefeatures\? data-type=text data="{}" status-code=200
+
+[MITM]
+hostname = %APPEND% *.cyapi.cn
