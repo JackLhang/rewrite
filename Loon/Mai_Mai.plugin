@@ -2,7 +2,7 @@
 #!desc = 去开屏广告
 #!author = JackLiu
 #!update = 2024-04-02 10:55
-#!icon = https://github.com/zxlie/mmspider/blob/master/icon.png
+#!icon = https://raw.githubusercontent.com/zxlie/mmspider/master/icon.png
 
 # ======= C ======= #
 [Rewrite]
