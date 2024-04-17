@@ -1,0 +1,28 @@
+#!name=腾讯视频净化
+#!desc=2023-08-02
+#!icon=https://github.com/Toperlock/Quantumult/raw/main/icon/Doraemon/Doraemon-1070.png
+
+[General]
+force-http-engine-hosts = <ip-address>, <ip-address>:49155
+
+[Rule]
+AND,((PROTOCOL,HTTPS), (DOMAIN,iacc.qq.com)),REJECT-NO-DROP
+# 腾讯视频
+DOMAIN,adsmind.gdtimg.com,REJECT
+DOMAIN,btrace.qq.com,REJECT
+DOMAIN,info6.video.qq.com,REJECT
+DOMAIN,ios.video.mpush.qq.com,REJECT
+DOMAIN,mtrace.qq.com,REJECT
+DOMAIN,pgdt.gtimg.cn,DIRECT
+
+[Rewrite]
+^http:\/\/.+\.tc\.qq\.com - reject-dict
+
+[Script]
+# > 开屏
+http-request ^http:\/\/pgdt\.gtimg\.cn script-path=http://script.hub/convert/_start_/xxxx.jpg/_end_/xxxx.jpg?type=mock&target-app=loon-plugin, timeout=60, tag=xxxx
+
+http-request ^(https:\/\/i\.video|http:\/\/iacc)\.qq\.com\/$ script-path=https://raw.githubusercontent.com/chengkongyiban/shadowrocket/main/scripts/Tx.js, tag=视频广告
+
+[MITM]
+hostname = i.video.qq.com, iacc.qq.com
