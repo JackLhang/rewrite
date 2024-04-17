@@ -7,10 +7,9 @@
 #!date = 2023-10-01 21:35:52
 
 [Rule]
-# > 腾讯视频 去开屏
-URL-REGEX,^https:\/\/ossgw\.alicdn\.com\/creatives-assets/prod/feupload/user,REJECT
-IP-CIDR,47.110.187.87/32,REJECT,no-resolve
-OR,((DOMAIN,pgdt.gtimg.cn), (AND,((USER-AGENT,live4iphoneRel*), (IP-CIDR,0.0.0.0/0,no-resolve)))),REJECT-DROP
+IP-CIDR,47.110.187.87/32, REJECT, no-resolve
+USER-AGENT,live4iphoneRel*, REJECT-DROP, no-resolve
+IP-CIDR,0.0.0.0/0, REJECT-DROP, no-resolve
 DOMAIN, adsmind.gdtimg.com, REJECT
 DOMAIN, info4.video.qq.com, REJECT
 DOMAIN, info6.video.qq.com, REJECT
@@ -25,9 +24,12 @@ DOMAIN-KEYWORD, trace.video.qq.com, REJECT
 URL-REGEX, ^http:\/\/[\d\.:]*\/?(defaultts\.tc|vmind\.qqvideo\.tc|finderpdd\.video)\.qq\.com\/\w+, REJECT
 URL-REGEX, ^http:\/\/apd-vlive\.apdcdn\.tc\.qq\.com\/vmind\.qqvideo\.tc\.qq\.com\/\w+, REJECT
 URL-REGEX, ^http:\/\/apd-\w+\.v\.smtcdns\.com\/(defaultts|omts|vmind\.qqvideo)\.tc\.qq\.com\/\w+, REJECT
+URL-REGEX,^https:\/\/ossgw\.alicdn\.com\/creatives-assets/prod/feupload/user, REJECT
 
 [Rewrite]
 ^https?:\/\/vv\.video\.qq\.com\/(diff|get)vmind reject-dict
+^http:\/\/pgdt\.gtimg\.cn - reject-dict
+^http:\/\/.+\/vmind\.qqvideo\.tc\.qq\.com\/.+mp4 - reject-dict
 
 [Script]
 http-request ^https?:\/\/vv\.video\.qq\.com\/getvinfo script-path = https://gitlab.com/lodepuly/vpn_tool/-/raw/master/Resource/Script/CommonScript/replace-body.js, requires-body = true, argument = "&sppreviewtype=\d(.*)&spsrt=\d->&sppreviewtype=0$1&spsrt=0", tag = 移除广告
