@@ -6,6 +6,9 @@
 #!icon = https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Tencent_Video.png
 #!date = 2024-04-19 11:13:52
 
+[General]
+force-http-engine-hosts = <ip-address>, <ip-address>:49155
+
 [Rule]
 AND,((PROTOCOL,HTTPS), (DOMAIN,iacc.qq.com)),REJECT-NO-DROP
 OR,((DOMAIN,pgdt.gtimg.cn), (AND,((USER-AGENT,live4iphoneRel*), (IP-CIDR,0.0.0.0/0,no-resolve)))),REJECT-DROP
