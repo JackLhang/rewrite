@@ -1,7 +1,7 @@
 #!name = 屏蔽IOS更新
 #!desc= 屏蔽 iOS 系统更新且需匹配REJECT策略组
 #!icon=https://github.com/Toperlock/Quantumult/raw/main/icon/Doraemon/Doraemon-1070.png
-#!homepage=https://raw.githubusercontent.com/Tartarus2014/Loon-Script/master/Plugin/Block/Block%20Update.plugin
+#!homepage=https://raw.githubusercontent.com/Elysian-Realme/FuGfConfig/main/ConfigFile/Loon/LoonRemoteRule/Apple/AppleUpdateRules.conf
 
 [Rule]
 DOMAIN,ns.itunes.apple.com,REJECT
