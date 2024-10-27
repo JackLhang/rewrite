@@ -71,14 +71,14 @@ scriptings:
   - http_response:
       name: 腾讯
       match: ^https:\/\/(news\.ssp\.qq\.com\/app|r\.inews\.qq\.com\/(get(QQNewsUnreadList|TagFeedList)|gw\/page\/event_detail|news_feed\/hot_module_list))
-      script_url: https://raw.githubusercontent.com/app2smile/rules/master/js/qq-news.js
+      script_url: https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/tencentNew.js
       timeout: 60
       body_required: true
 
   - http_request:
       name: 腾讯
       match: ^https?:\/\/vv\.video\.qq\.com\/getvinfo
-      script_url: https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/scripts/replace-body.js
+      script_url: https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/tencent1.js
       arguments:
         _compat.$argument: '"&sppreviewtype=\d(.*)&spsrt=\d->&sppreviewtype=0$1&spsrt=0"'
       timeout: 30
