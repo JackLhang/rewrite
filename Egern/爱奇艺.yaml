@@ -1,0 +1,112 @@
+name: 爱奇艺去广告
+description: 移除开屏广告、焦点图广告、瀑布流广告、搜索页面广告、移除青少年弹窗，精简底栏和我的页面。
+open_url: https://apps.apple.com/app/id1190755526
+author: 可莉🅥[https://github.com/luestr/ProxyResource/blob/main/README.md]
+icon: https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/iQiYi_Video.png
+rules:
+- ip_cidr:
+    match: 103.44.59.54/32
+    policy: REJECT
+    no_resolve: true
+- ip_cidr:
+    match: 111.63.147.158/32
+    policy: REJECT
+    no_resolve: true
+- ip_cidr:
+    match: 116.211.198.237/32
+    policy: REJECT
+    no_resolve: true
+- domain_suffix:
+    match: cupid.iqiyi.com
+    policy: DIRECT
+- domain:
+    match: api.iqiyi.com
+    policy: REJECT
+- domain:
+    match: access.if.iqiyi.com
+    policy: REJECT
+body_rewrites:
+- response_jq:
+    match: ^https:\/\/cards\.iqiyi\.com\/views_home\/3\.0\/qy_home\?
+    filter: delpaths([["base","statistics"]])
+- response_jq:
+    match: ^https:\/\/cards\.iqiyi\.com\/views_home\/3\.0\/qy_home\?
+    filter: del(.cards[] | select(.alias_name == "focus" or .alias_name == "ad_mobile_flow" or .alias_name == "ad_trueview"))
+- response_jq:
+    match: ^https:\/\/cards\.iqiyi\.com\/views_category\/3\.0\/category_home\?
+    filter: del(.base.statistics | select(.ad_str)) | del(.cards[] | select(.alias_name == "entrence_focus" or .alias_name == "ad_trueview"))
+- response_jq:
+    match: ^https:\/\/cards\.iqiyi\.com\/waterfall(-plt)?\/3\.0\/feed\?
+    filter: del(.base.statistics | select(.ad_str)) | del(.. | select(.block_class?))
+- response_jq:
+    match: ^https:\/\/cards\.iqiyi\.com\/views_plt\/3\.0\/player_tabs_v2\?
+    filter: delpaths([["kv_pair","activity_tab"]])
+- response_jq:
+    match: ^https:\/\/cards\.iqiyi\.com\/views_plt\/3\.0\/player_tabs_v2\?
+    filter: del(.cards[] | select(.alias_name == "play_vip_promotion" or .alias_name == "play_detail_tag" or .alias_name == "play_chat_entrance" or .alias_name == "play_ad_no_vip" or .alias_name == "play_vertical_short_video" or .alias_name == "play_rap_custom" or .alias_name == "play_topical_tab" or .alias_name == "play_vertical" or .alias_name == "play_water_fall_like")) | del(.. | select(.block_class?))
+- response_jq:
+    match: ^https:\/\/comment-card\.iqiyi\.com\/views_comment\/3\.0\/long_video_comments\?
+    filter: ''
+- response_jq:
+    match: ^https:\/\/cards\.iqiyi\.com\/views_search\/3\.0\/hot_query_search\?
+    filter: .cards |= map(select(.alias_name as $name | $name != "ad_trueview" and $name != "ad_mobile_flow" and $name != "search_mid_text_ad")) | if .base.statistics.ad_str? then del(.base.statistics) else . end
+- response_jq:
+    match: ^https?:\/\/comment-card\.iqiyi\.com\/views_comment\/3\.0\/long_video_comments\?
+    filter: .cards |= map(select(has("alias_name")))
+- response_jq:
+    match: ^https?:\/\/iface2\.iqiyi\.com\/views_menus\/3\.0\/bottom_theme\?
+    filter: delpaths([["theme_list"]])
+- response_jq:
+    match: ^https?:\/\/iface2\.iqiyi\.com\/views_menus\/3\.0\/bottom_theme\?
+    filter: .cards |= map(.items |= map(select(.other.bottom_tab_type == "rec" or .other.bottom_tab_type == "my")))
+- response_jq:
+    match: ^https?:\/\/iface2\.iqiyi\.com\/views_menus\/3\.0\/home_top_menu\?
+    filter: .nav_group_data[].nav_list |= map(select(. == "0" or . == "2" or . == "1007" or . == "1" or . == "6" or . == "3"))
+- response_jq:
+    match: ^https?:\/\/iface2\.iqiyi\.com\/fusion\/3\.0\/common_switch\?
+    filter: delpaths([["content","resource","cast_device_ad"]])
+- response_jq:
+    match: ^https?:\/\/iface2\.iqiyi\.com\/fusion\/3\.0\/common_switch\?
+    filter: if (getpath(["content","switchs","app_ad"]) | has("app_ad_enable")) then (setpath(["content","switchs","app_ad","app_ad_enable"]; 0)) else . end
+- response_jq:
+    match: ^https?:\/\/iface2\.iqiyi\.com\/fusion\/3\.0\/common_switch\?
+    filter: if (getpath(["content","switchs","app_ad"]) | has("app_ad_duration")) then (setpath(["content","switchs","app_ad","app_ad_duration"]; 0)) else . end
+- response_jq:
+    match: ^https?:\/\/iface2\.iqiyi\.com\/fusion\/3\.0\/common_switch\?
+    filter: if (getpath(["content","switchs","ios_tech"]) | has("kPreadAdHintSwitch")) then (setpath(["content","switchs","ios_tech","kPreadAdHintSwitch"]; 0)) else . end
+- response_jq:
+    match: ^https?:\/\/iface2\.iqiyi\.com\/fusion\/3\.0\/common_switch\?
+    filter: if (getpath(["content","switchs","ios_tech"]) | has("ad_download")) then (setpath(["content","switchs","ios_tech","ad_download"]; 0)) else . end
+- response_jq:
+    match: ^https?:\/\/iface2\.iqiyi\.com\/fusion\/3\.0\/common_switch\?
+    filter: if (getpath(["content","switchs","m_qiyi_ios_tech"]) | has("KFocusAdVideoPlayTimesIn4G")) then (setpath(["content","switchs","m_qiyi_ios_tech","KFocusAdVideoPlayTimesIn4G"]; 0)) else . end
+- response_jq:
+    match: ^https?:\/\/(kjp|t7z)\.cupid\.iqiyi\.com\/mixer\?
+    filter: delpaths([["adSlots"]])
+- response_jq:
+    match: ^https?:\/\/search\.video\.iqiyi\.com\/q\?
+    filter: delpaths([["data"]])
+- response_jq:
+    match: ^https?:\/\/iface2\.iqiyi\.com\/aggregate\/3\.0\/getMyMenus\?
+    filter: .data |= map(select(.statistic.block != "wd_liebiao_2") | select(all(.menuList[]?.statistic2.block; . != "wd_liebiao_3")))
+map_locals:
+- match: ^https?:\/\/iface2\.iqiyi\.com\/control\/3\.0\/init_proxy\?
+  status_code: 200
+  body: '{}'
+- match: ^https?:\/\/act\.vip\.iqiyi\.com\/interact\/api\/v2\/show\?
+  status_code: 200
+  body: '{}'
+- match: ^https?:\/\/iface2\.iqiyi\.com\/ivos\/interact\/video\/data\?
+  status_code: 200
+  body: '{}'
+- match: ^https?:\/\/iface2\.iqiyi\.com\/video\/3\.0\/v_interface_proxy\?
+  status_code: 200
+  body: '{}'
+- match: ^https?:\/\/iface2\.iqiyi\.com\/views_pop\/3\.0\/pop_control\?
+  status_code: 200
+  body: '{}'
+mitm:
+  hostnames:
+    includes:
+    - -i.vip.iqiyi.com
+    - '*.iqiyi.com'
