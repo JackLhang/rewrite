@@ -1,6 +1,7 @@
 #!name=腾讯去广告
 #!desc=去除腾讯相关的广告
 #!icon=https://github.com/Toperlock/Quantumult/raw/main/icon/Doraemon/Doraemon-1096.png
+#!date = 2025-05-28 15:08:52
 
 [Rule]
 # > 腾讯视频
