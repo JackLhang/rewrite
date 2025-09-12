@@ -1,6 +1,13 @@
 #!name=腾讯去广告
 #!desc=去除腾讯相关的广告
 #!icon=https://github.com/Toperlock/Quantumult/raw/main/icon/Doraemon/Doraemon-1096.png
+#!date = 2025-05-28 15:08:52
+
+[Rule]
+# > 腾讯视频
+IP-CIDR,47.110.187.87/32,REJECT,no-resolve
+OR,((DOMAIN,pgdt.gtimg.cn),AND,((USER-AGENT,"live4iphoneRel*"),(IP-CIDR,0.0.0.0/0,no-resolve))),REJECT-DROP
+URL-REGEX,"^https:\/\/ossgw\.alicdn\.com\/creatives-assets/prod/feupload/user",REJECT
 
 [Rewrite]
 # > 腾讯视频
@@ -70,4 +77,4 @@ http-response ^https?:\/\/(news\.ssp\.qq\.com\/app|r\.inews\.qq\.com\/(get(QQNew
 
 
 [MITM]
-hostname = btrace.qq.com, api2.helper.qq.com, *.beacon.qq.com, mi.gdt.qq.com, lives.l.qq.com, imgcache.qq.com, mtteve.beacon.qq.com, vv.video.qq.com, ssl.kohsocialapp.qq.com, qt.qq.com, 3gimg.qq.com, y.gtimg.cn, splashqqlive.gtimg.com, qzonestyle.gtimg.cn, discuz.gtimg.cn, bla.gtimg.com, mmgr.gtimg.com, bk.bingo.qq.com,news.ssp.qq.com, sports3.gtimg.com,4gimg.map.qq.com,otheve.beacon.qq.com,ssl.kohsocialapp.qq.com, qt.qq.com,static.gameplus.qq.com,ccmsupport-sz.tenpay.com,vv.video.qq.com
+hostname = ossgw.alicdn.com,btrace.qq.com, api2.helper.qq.com, *.beacon.qq.com, mi.gdt.qq.com, lives.l.qq.com, imgcache.qq.com, mtteve.beacon.qq.com, vv.video.qq.com, ssl.kohsocialapp.qq.com, qt.qq.com, 3gimg.qq.com, y.gtimg.cn, splashqqlive.gtimg.com, qzonestyle.gtimg.cn, discuz.gtimg.cn, bla.gtimg.com, mmgr.gtimg.com, bk.bingo.qq.com,news.ssp.qq.com, sports3.gtimg.com,4gimg.map.qq.com,otheve.beacon.qq.com,ssl.kohsocialapp.qq.com, qt.qq.com,static.gameplus.qq.com,ccmsupport-sz.tenpay.com,vv.video.qq.com
