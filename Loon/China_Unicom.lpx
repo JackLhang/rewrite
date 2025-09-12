@@ -1,6 +1,6 @@
 #!name = 中国联通去广告
 #!desc= 去除中国联通APP的广告
-#!icon=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/CSV/liantongApp.png
+#!icon=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/CSV/liantongAPP.png
 
 
 [Rule]
