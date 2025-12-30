@@ -5,18 +5,18 @@
 
 [Rule]
 # > 腾讯视频
-IP-CIDR,47.110.187.87/32,REJECT,no-resolve
-OR,((DOMAIN,pgdt.gtimg.cn),AND,((USER-AGENT,"live4iphoneRel*"),(IP-CIDR,0.0.0.0/0,no-resolve))),REJECT-DROP
-URL-REGEX,"^https:\/\/ossgw\.alicdn\.com\/creatives-assets/prod/feupload/user",REJECT
+# IP-CIDR,47.110.187.87/32,REJECT,no-resolve
+# OR,((DOMAIN,pgdt.gtimg.cn),AND,((USER-AGENT,"live4iphoneRel*"),(IP-CIDR,0.0.0.0/0,no-resolve))),REJECT-DROP
+# URL-REGEX,"^https:\/\/ossgw\.alicdn\.com\/creatives-assets/prod/feupload/user",REJECT
 
 [Rewrite]
 # > 腾讯视频
 # hostname = vv.video.qq.com
-^https?:\/\/[\d\.:]*\/?(defaultts\.tc|vmind\.qqvideo\.tc|finderpdd\.video)\.qq\.com\/\w+ reject
-^https?:\/\/apd-vlive\.apdcdn\.tc\.qq\.com\/vmind\.qqvideo\.tc\.qq\.com\/\w+ reject
-^https?:\/\/apd-\w+\.v\.smtcdns\.com\/(defaultts|omts|vmind\.qqvideo)\.tc\.qq\.com\/\w+ reject
-^https?:\/\/vv\.video\.qq\.com\/(diff|get)vmind reject-dict
-^https?:\/\/vv\.video\.qq\.com\/getvinfo response-body-replace-regex &sppreviewtype=\d(.*)&spsrt=\d &sppreviewtype=0$1&spsrt=0
+# ^https?:\/\/[\d\.:]*\/?(defaultts\.tc|vmind\.qqvideo\.tc|finderpdd\.video)\.qq\.com\/\w+ reject
+# ^https?:\/\/apd-vlive\.apdcdn\.tc\.qq\.com\/vmind\.qqvideo\.tc\.qq\.com\/\w+ reject
+# ^https?:\/\/apd-\w+\.v\.smtcdns\.com\/(defaultts|omts|vmind\.qqvideo)\.tc\.qq\.com\/\w+ reject
+# ^https?:\/\/vv\.video\.qq\.com\/(diff|get)vmind reject-dict
+# ^https?:\/\/vv\.video\.qq\.com\/getvinfo response-body-replace-regex &sppreviewtype=\d(.*)&spsrt=\d &sppreviewtype=0$1&spsrt=0
 
 # > 腾讯乘车码微信小程序
 # hostname = ccmsupport-sz.tenpay.com
