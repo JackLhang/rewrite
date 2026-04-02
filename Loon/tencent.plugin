@@ -9,6 +9,13 @@
 # OR,((DOMAIN,pgdt.gtimg.cn),AND,((USER-AGENT,"live4iphoneRel*"),(IP-CIDR,0.0.0.0/0,no-resolve))),REJECT-DROP
 # URL-REGEX,"^https:\/\/ossgw\.alicdn\.com\/creatives-assets/prod/feupload/user",REJECT
 
+# 腾讯视频去开屏广告
+DOMAIN,ad.tencentvideo.com,REJECT
+DOMAIN,adstats.tencentvideo.com,REJECT
+DOMAIN,info6.video.qq.com,REJECT
+DOMAIN-SUFFIX,gdtimg.com,REJECT
+DOMAIN-SUFFIX,ugdtimg.com,REJECT
+
 [Rewrite]
 # > 腾讯视频
 # hostname = vv.video.qq.com
