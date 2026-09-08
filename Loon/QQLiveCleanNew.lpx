@@ -1,0 +1,43 @@
+#!name=腾讯视频去广告+精简 (QQLiveClean)
+#!desc=基于 iOS 腾讯视频 v9.04.45 (live4iphoneRel) 抓包分析：去除首页/个人中心信息流广告、悬浮广告、VIP 促销卡、运营推广接口；精简「我的」页面（移除广告位与推广项）与底部 Tab 栏（去掉短剧/好物）。MVL 页面数据为 protobuf，由 QQLiveClean.js 无损改写响应；请勿改脚本与插件路径。
+#!author=Agentic Builder
+#!homepage=
+#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Tencent_Video.png
+#!openUrl=https://apps.apple.com/app/id458318329
+#!tag=去广告
+#!system=ios
+#!version=1.0.1
+#!date=2026-09-08
+
+[General]
+
+[URL Rewrite]
+# ---- 腾讯广告 SDK / 广告素材 / 广告统计（修正为 Loon 标准 reject_dict(200)）----
+^https?:\/\/iacc\.qq\.com reject_dict(200)
+^https?:\/\/iacc\.rec\.qq\.com reject_dict(200)
+^https?:\/\/rdelivery\.qq\.com reject_dict(200)
+^https?:\/\/cloud\.tgpa\.qq\.com reject_dict(200)
+^https?:\/\/hc\.tdm\.qq\.com reject_dict(200)
+^https?:\/\/receiver\.tdm\.qq\.com reject_dict(200)
+^https?:\/\/disp-qryapi\.3g\.qq\.com reject_dict(200)
+^https?:\/\/playproxy\.video\.qq\.com\/monet reject_dict(200)
+^https?:\/\/vip\.video\.qq\.com\/rpc\/trpc\.vip_ad_promotion\. reject_dict(200)
+^https?:\/\/pgdt\.gtimg\.cn reject_dict(200)
+^https?:\/\/pgdt\.gtimg\.com reject_dict(200)
+^https?:\/\/gdtimg\.cn reject_dict(200)
+# ---- 埋点 / 遥测上报 ----
+^https?:\/\/galileotelemetry\.tencent\.com reject_dict(200)
+^https?:\/\/beacon\.cdn\.qq\.com reject_dict(200)
+^https?:\/\/aegis\.cdn-go\.cn reject_dict(200)
+^https?:\/\/rumt-zh\.com reject_dict(200)
+^https?:\/\/trace\.inlong\.qq\.com reject_dict(200)
+^https?:\/\/szmg\.qq\.com reject_dict(200)
+^https?:\/\/snowflake\.qq\.com reject_dict(200)
+
+[Script]
+# 增强了正则容错率，确保任何携带参数的网关请求都能正确触发 JS
+http-request ^https?:\/\/i\.video\.qq\.com script-path=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js, requires-body=true, timeout=10, tag=QQLive_adapi
+http-response ^https?:\/\/i\.video\.qq\.com script-path=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js, requires-body=true, timeout=15, tag=QQLive_clean
+
+[MITM]
+hostname = i.video.qq.com, iacc.qq.com, iacc.rec.qq.com, rdelivery.qq.com, cloud.tgpa.qq.com, hc.tdm.qq.com, receiver.tdm.qq.com, disp-qryapi.3g.qq.com, playproxy.video.qq.com, vip.video.qq.com, pgdt.gtimg.cn, pgdt.gtimg.com, gdtimg.cn, galileotelemetry.tencent.com, beacon.cdn.qq.com, aegis.cdn-go.cn, rumt-zh.com, trace.inlong.qq.com, szmg.qq.com, snowflake.qq.com
