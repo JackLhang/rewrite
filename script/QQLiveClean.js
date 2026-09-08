@@ -432,14 +432,30 @@
     shouldBlockRequest: shouldBlockRequest,
     EMPTY_FRAME_B64: EMPTY_FRAME_B64,
     _b64decode: function (s) {
-      var bin = atob(s), out = new Uint8Array(bin.length), i;
-      for (i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-      return out;
+      // 纯 JS base64 解码（兼容任意 Loon 版本，不依赖 atob/$utils）
+      var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+      var out = [], buf = 0, bits = 0, i, c, idx;
+      for (i = 0; i < s.length; i++) {
+        c = s.charAt(i);
+        if (c === '=') break;
+        idx = chars.indexOf(c);
+        if (idx < 0) continue;
+        buf = (buf << 6) | idx; bits += 6;
+        if (bits >= 8) { bits -= 8; out.push((buf >> bits) & 0xff); }
+      }
+      return new Uint8Array(out);
     },
     _b64encode: function (u8) {
-      var bin = '', i;
-      for (i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
-      return btoa(bin);
+      // 纯 JS base64 编码
+      var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+      var out = '', i, b0, b1, b2;
+      for (i = 0; i < u8.length; i += 3) {
+        b0 = u8[i]; b1 = i + 1 < u8.length ? u8[i + 1] : 0; b2 = i + 2 < u8.length ? u8[i + 2] : 0;
+        out += chars[b0 >> 2] + chars[((b0 & 3) << 4) | (b1 >> 4)];
+        out += i + 1 < u8.length ? chars[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+        out += i + 2 < u8.length ? chars[b2 & 63] : '=';
+      }
+      return out;
     },
     processResponse: function (bodyB64) {
       var raw = api._b64decode(bodyB64);
@@ -453,20 +469,41 @@
     }
   };
   global.QQLiveClean = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this);
 
-/* ============ Loon 桥接 ============ */
-if (typeof $done !== 'undefined') {
-  try {
-    if (typeof $response !== 'undefined' && $response && $response.body) {
-      var _out = QQLiveClean.processResponse($response.body);
-      if (_out) { $response.body = _out; $done({ response: $response }); }
-      else { $done({}); }
-    } else {
-      var _blocked = $request && $request.body ? QQLiveClean.processRequest($request.body) : false;
-      if (_blocked) {
-        $done({ response: { status: 200, headers: { 'content-type': 'application/octet-stream' }, body: QQLiveClean.EMPTY_FRAME_B64 } });
-      } else { $done({}); }
+  /* ============ 诊断日志（Loon 控制台日志中搜 QQLiveClean） ============ */
+  function log(msg) {
+    try { if (typeof console !== 'undefined' && console.log) console.log('[QQLiveClean] ' + msg); } catch (e) {}
+  }
+
+  /* ============ Loon 桥接（IIFE 内，不依赖全局变量暴露） ============ */
+  if (typeof $done !== 'undefined') {
+    try {
+      var _u = (typeof $request !== 'undefined' && $request && $request.url) ? $request.url : '';
+      var _reqBody = (typeof $request !== 'undefined' && $request && $request.body) ? $request.body : null;
+      if (typeof $response !== 'undefined' && $response && $response.body) {
+        var _t0 = Date.now ? Date.now() : 0;
+        var _out = api.processResponse($response.body);
+        if (_out && _out !== $response.body) {
+          $response.body = _out;
+          log('response EDITED ' + (_t0 ? (Date.now() - _t0) + 'ms ' : '') + _u);
+          $done({ response: $response });
+        } else {
+          $done({});
+        }
+      } else {
+        var _blocked = _reqBody ? api.processRequest(_reqBody) : false;
+        if (_blocked) {
+          log('request BLOCKED (ad api) ' + _u);
+          $done({ response: { status: 200, headers: { 'content-type': 'application/octet-stream' }, body: api.EMPTY_FRAME_B64 } });
+        } else {
+          $done({});
+        }
+      }
+    } catch (e) {
+      try { log('error: ' + (e && e.message ? e.message : e)); } catch (e2) {}
+      try { $done({}); } catch (e3) {}
     }
-  } catch (e) { $done({}); }
-}
+  }
+})(typeof globalThis !== 'undefined' ? globalThis
+    : (typeof self !== 'undefined' ? self
+    : (typeof window !== 'undefined' ? window : {})));
