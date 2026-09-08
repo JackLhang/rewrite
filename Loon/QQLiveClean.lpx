@@ -37,8 +37,8 @@
 
 #复写
 [Script]
-http-request ^https://i\.video\.qq\.com/ script-path=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/tencentNew.js requires-body=true, timeout=10, tag=QQLive_adapi
-http-response ^https://i\.video\.qq\.com/ script-path=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/tencentNew.js, requires-body=true, timeout=15, tag=QQLive_clean
+http-request ^https://i\.video\.qq\.com/ script-path=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js requires-body=true, timeout=10, tag=QQLive_adapi
+http-response ^https://i\.video\.qq\.com/ script-path=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js, requires-body=true, timeout=15, tag=QQLive_clean
 
 [MITM]
 hostname = i.video.qq.com, iacc.qq.com, iacc.rec.qq.com, rdelivery.qq.com, cloud.tgpa.qq.com, hc.tdm.qq.com, receiver.tdm.qq.com, disp-qryapi.3g.qq.com, playproxy.video.qq.com, vip.video.qq.com, pgdt.gtimg.cn, pgdt.gtimg.com, gdtimg.cn, galileotelemetry.tencent.com, beacon.cdn.qq.com, aegis.cdn-go.cn, rumt-zh.com, trace.inlong.qq.com, szmg.qq.com, snowflake.qq.com
