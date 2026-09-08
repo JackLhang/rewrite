@@ -1,0 +1,54 @@
+#!name=腾讯视频去广告+精简 (QQLiveClean)
+#!desc=基于 iOS 腾讯视频 v9.04.45 (live4iphoneRel) 抓包分析：去除首页/个人中心信息流广告、悬浮广告、VIP 促销卡、运营推广接口；精简「我的」页面（移除广告位与推广项）与底部 Tab 栏（去掉短剧/好物）。MVL 页面数据为 protobuf，由 QQLiveClean.js 无损改写响应；请勿改脚本与插件路径。
+#!author=Agentic Builder
+#!homepage=
+#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Tencent_Video.png
+#!openUrl=https://apps.apple.com/app/id458318329
+#!tag=去广告
+#!system=ios
+#!version=1.0.0
+#!date=2026-09-08
+
+[General]
+
+
+[URL Rewrite]
+# ---- 腾讯广告 SDK / 广告素材 / 广告统计（整域或整路径 reject-200，返回空 200 不触发重试）----
+^https?://iacc\.qq\.com/.* reject-200
+^https?://iacc\.rec\.qq\.com/.* reject-200
+^https?://rdelivery\.qq\.com/.* reject-200
+^https?://cloud\.tgpa\.qq\.com/.* reject-200
+^https?://hc\.tdm\.qq\.com/.* reject-200
+^https?://receiver\.tdm\.qq\.com/.* reject-200
+^https?://disp-qryapi\.3g\.qq\.com/.* reject-200
+^https?://playproxy\.video\.qq\.com/monet.* reject-200
+^https?://vip\.video\.qq\.com/rpc/trpc\.vip_ad_promotion\..* reject-200
+^https?://pgdt\.gtimg\.cn/.* reject-200
+^https?://pgdt\.gtimg\.com/.* reject-200
+^https?://gdtimg\.cn/.* reject-200
+# ---- 埋点 / 遥测上报（不影响任何功能，默认开启以省电省流量；如遇问题可整行注释）----
+^https?://galileotelemetry\.tencent\.com/.* reject-200
+^https?://beacon\.cdn\.qq\.com/.* reject-200
+^https?://aegis\.cdn-go\.cn/.* reject-200
+^https?://rumt-zh\.com/.* reject-200
+^https?://trace\.inlong\.qq\.com/.* reject-200
+^https?://szmg\.qq\.com/.* reject-200
+^https?://snowflake\.qq\.com/.* reject-200
+
+#复写
+[Script]
+http-request ^https://i\.video\.qq\.com/ script-path=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/tencentNew.js requires-body=true, timeout=10, tag=QQLive_adapi
+http-response ^https://i\.video\.qq\.com/ script-path=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/tencentNew.js, requires-body=true, timeout=15, tag=QQLive_clean
+
+[MITM]
+hostname = i.video.qq.com, iacc.qq.com, iacc.rec.qq.com, rdelivery.qq.com, cloud.tgpa.qq.com, hc.tdm.qq.com, receiver.tdm.qq.com, disp-qryapi.3g.qq.com, playproxy.video.qq.com, vip.video.qq.com, pgdt.gtimg.cn, pgdt.gtimg.com, gdtimg.cn, galileotelemetry.tencent.com, beacon.cdn.qq.com, aegis.cdn-go.cn, rumt-zh.com, trace.inlong.qq.com, szmg.qq.com, snowflake.qq.com
+
+# ============ 附注 ============
+# 1. i.video.qq.com 为业务 tRPC 网关（App 全部业务走它），不能用 URL 规则整域拦截；
+# 网关内的广告方法（GetFloatActivity / GetFollowHeartRewardAdInfo / GetSDKInitData /
+# AccessPromotion 等）由 QQLiveClean.js 的 http-request 分支按请求体方法名直接返回空帧；
+# 页面内广告（ad_block_* 卡 / AdFeedInfo / AdResponseInfo / 个人中心 ad_middle 等）由
+# http-response 分支无损改写 protobuf 响应。
+# 2. 个人中心「更多/顶部」里被移除的运营推广项、VIP 促销卡、Tab 栏移除名单均可在
+# QQLiveClean.js 顶部 CFG 中调整（如想保留「会员专区」Tab 请勿改，默认保留）。
+# 3. 若 App 更新后界面回归，通常为新版运营文案/模块名变化，调整 CFG 名单即可，无需改算法。
