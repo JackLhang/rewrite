@@ -2,6 +2,7 @@
  * QQLiveClean.js — 腾讯视频 iOS（v9.x / MVL 布局）去广告 + 个人中心与 Tab 精简
  * 运行环境: Loon Script (http-request / http-response)
  * 实现: 无损 protobuf 子树删除（wire-format 级，不解析业务 schema）
+ * date: 2026-09-09 16:32:11
  */
 (function (global) {
   'use strict';
