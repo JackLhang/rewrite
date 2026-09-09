@@ -360,6 +360,11 @@
   }
   function processResponseBody(body) {
     if (!body || body.length < 30) return null;
+    if (isGzip(body)) {
+      var plain = inflateGzip(body);
+      if (!plain) return null;
+      body = plain;
+    }
     var anchor = bodyAnchor(body);
     if (anchor < 0) return null;
     var newBody = null;
@@ -373,7 +378,15 @@
     if (!newBody && containsBytes(body, utf8Bytes('user_center_more_function'))) {
       newBody = editPageExactAt(body, [predAdModule], [predVipPromo, predOpItem]);
     }
-    if (!newBody && (containsBytes(body, utf8Bytes('ad_block_')) || containsBytes(body, utf8Bytes('AdFeed'))
+    var pageish = containsBytes(body, utf8Bytes('user_center_')) || containsBytes(body, utf8Bytes('GetTabListRsp'))
+      || containsBytes(body, utf8Bytes('ad_block_')) || containsBytes(body, utf8Bytes('AdFeedInfo'));
+    var standaloneAd = (containsBytes(body, utf8Bytes('InnerAdCommon')) || containsBytes(body, utf8Bytes('LoadingConfig'))
+      || containsBytes(body, utf8Bytes('AdFeedVideoPoster'))) && !pageish;
+    if (standaloneAd) {
+      // 独立广告接口（GetFloatActivity / AccessPromotion / GetPersonalCenterAdData）：
+      // 整体替换为空响应帧模板（客户端解析为“无广告数据”）
+      newBody = b64decodeBytes(EMPTY_FRAME_B64);
+    } else if (!newBody && (containsBytes(body, utf8Bytes('ad_block_')) || containsBytes(body, utf8Bytes('AdFeed'))
         || containsBytes(body, utf8Bytes('AdResponseInfo')) || containsBytes(body, utf8Bytes('InnerAd'))
         || containsBytes(body, utf8Bytes('LoadingConfig')))) {
       newBody = editPageExactAt(body, [predAdCardId], [predAdCardId, predAdAnyField]);
@@ -415,7 +428,153 @@
     return out;
   }
 
+/* 纯 JS gzip inflate（RFC1950/1951），ES5 无依赖。返回 Uint8Array 或 null */
+function inflateGzip(src) {
+  if (!src || src.length < 18 || src[0] !== 0x1f || src[1] !== 0x8b || src[2] !== 8) return null;
+  var p = 10, flg = src[3], xlen, i;
+  if (flg & 4) { xlen = src[p] | (src[p + 1] << 8); p += 2 + xlen; }
+  if (flg & 8) { while (src[p] !== 0) p++; p++; }
+  if (flg & 16) { while (src[p] !== 0) p++; p++; }
+  if (flg & 2) p += 2;
+  if (p >= src.length) return null;
+
+  var inPos = p;
+  var out = [];
+
+  var bitPos = 0;
+  function getBits(n) {
+    var v = 0, i;
+    for (i = 0; i < n; i++) {
+      v |= ((src[inPos] >> bitPos) & 1) << i;
+      if (++bitPos === 8) { bitPos = 0; inPos++; }
+    }
+    return v;
+  }
+
+  function buildTable(lens, n) {
+    var maxLen = 0, i;
+    for (i = 0; i < n; i++) if (lens[i] > maxLen) maxLen = lens[i];
+    if (maxLen === 0) return null;
+    var count = new Array(maxLen + 1), code = new Array(maxLen + 1), j;
+    for (i = 0; i <= maxLen; i++) count[i] = 0;
+    for (i = 0; i < n; i++) count[lens[i]]++;
+    count[0] = 0;
+    code[0] = 0;
+    for (i = 1; i <= maxLen; i++) code[i] = (code[i - 1] + count[i - 1]) << 1;
+    var t = new Int16Array(1 << maxLen);
+    for (i = 0; i < t.length; i++) t[i] = -1;
+    for (i = 0; i < n; i++) {
+      var len = lens[i];
+      if (len === 0) continue;
+      var c = code[len]++;
+      var start = c << (maxLen - len), span = 1 << (maxLen - len);
+      for (j = start; j < start + span; j++) t[j] = i;
+    }
+    t.maxBits = maxLen;
+    t.lens = lens;
+    return t;
+  }
+
+  function readSym(t) {
+    var idx = 0, i, k;
+    for (i = 0; i < t.maxBits; i++) idx = (idx << 1) | getBits(1);
+    var s = t[idx];
+    if (s < 0) return -1;
+    k = t.maxBits - t.lens[s];
+    while (k-- > 0) { bitPos--; if (bitPos < 0) { bitPos = 7; inPos--; } }
+    return s;
+  }
+
+  /* fixed huffman 表：lit/dist 码长（RFC1951 3.2.6） */
+  var FIXED_LIT_LENS = new Array(288), FIXED_DIST_LENS = new Array(30), z;
+  for (z = 0; z < 144; z++) FIXED_LIT_LENS[z] = 8;
+  for (; z < 256; z++) FIXED_LIT_LENS[z] = 9;
+  for (; z < 280; z++) FIXED_LIT_LENS[z] = 7;
+  for (; z < 288; z++) FIXED_LIT_LENS[z] = 8;
+  for (z = 0; z < 30; z++) FIXED_DIST_LENS[z] = 5;
+  var FIXED_LIT = buildTable(FIXED_LIT_LENS, 288);
+  var FIXED_DIST = buildTable(FIXED_DIST_LENS, 30);
+  var ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+  var LEN_BASE = [3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258];
+  var LEN_EXT  = [0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0];
+  var DIST_BASE = [1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];
+  var DIST_EXT  = [0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
+
+  var finished = false, guard = 0, MAX_OUT = 2000000;
+  while (!finished) {
+    if (guard++ > 500000) return null;
+    var bfinal = getBits(1), btype = getBits(2);
+    if (btype === 0) {
+      if (bitPos !== 0) { inPos++; bitPos = 0; } /* 字节对齐：丢弃当前字节剩余位 */
+      if (inPos + 4 > src.length) return null;
+      var llen = src[inPos] | (src[inPos + 1] << 8);
+      var nlen = src[inPos + 2] | (src[inPos + 3] << 8);
+      inPos += 4;
+      if ((llen ^ 0xffff) !== nlen) return null;
+      if (inPos + llen > src.length || out.length + llen > MAX_OUT) return null;
+      for (var si = 0; si < llen; si++) out.push(src[inPos + si]);
+      inPos += llen;
+    } else {
+      var litT, distT;
+      if (btype === 1) { litT = FIXED_LIT; distT = FIXED_DIST; }
+      else if (btype === 2) {
+        var hlit = getBits(5) + 257, hdist = getBits(5) + 1, hclen = getBits(4) + 4;
+        if (hlit > 286 || hdist > 30) return null;
+        var clLens = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+        for (var ci = 0; ci < hclen; ci++) clLens[ORDER[ci]] = getBits(3);
+        var clT = buildTable(clLens, 19);
+        if (!clT) return null;
+        var allLens = [], lc = 0, total = hlit + hdist;
+        while (lc < total) {
+          var s = readSym(clT);
+          if (s < 0) return null;
+          if (s < 16) { allLens[lc++] = s; }
+          else if (s === 16) { var rep = getBits(2) + 3, prev = lc > 0 ? allLens[lc - 1] : 0; while (rep--) allLens[lc++] = prev; }
+          else if (s === 17) { var rep2 = getBits(3) + 3; while (rep2--) allLens[lc++] = 0; }
+          else { var rep3 = getBits(7) + 11; while (rep3--) allLens[lc++] = 0; }
+          if (lc > total) return null;
+        }
+        var litLens = allLens.slice(0, hlit), distLens = allLens.slice(hlit, hlit + hdist);
+        litT = buildTable(litLens, hlit);
+        distT = buildTable(distLens, hdist);
+        if (!litT || !distT) return null;
+      } else return null;
+      for (;;) {
+        if (out.length > MAX_OUT) return null;
+        var sym = readSym(litT);
+        if (sym < 0) return null;
+        if (sym === 256) break;
+        if (sym < 256) out.push(sym);
+        else {
+          var li = sym - 257;
+          var l = LEN_BASE[li] + getBits(LEN_EXT[li]);
+          var ds = readSym(distT);
+          if (ds < 0 || ds > 29) return null;
+          var d = DIST_BASE[ds] + getBits(DIST_EXT[ds]);
+          if (d > out.length) return null;
+          for (var m = 0; m < l; m++) out.push(out[out.length - d]);
+        }
+      }
+    }
+    finished = bfinal === 1;
+  }
+  return new Uint8Array(out);
+}
+
   /* ============ 请求拦截（广告 API mock 空帧） ============ */
+  function b64decodeBytes(s) {
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var out = [], buf = 0, bits = 0, i, c, idx;
+    for (i = 0; i < s.length; i++) {
+      c = s.charAt(i);
+      if (c === '=') break;
+      idx = chars.indexOf(c);
+      if (idx < 0) continue;
+      buf = (buf << 6) | idx; bits += 6;
+      if (bits >= 8) { bits -= 8; out.push((buf >> bits) & 0xff); }
+    }
+    return new Uint8Array(out);
+  }
   var EMPTY_FRAME_B64 = 'CTAAAAAAcNsAyjoCsZsBABjlAUJhCg1hY2Nlc3NfcmVwb3J0ElB7InNlcnZpY2VfbmFtZSI6InRycGMub3ZiX2dhbGF4eS5nYXRld2F5Lmh0dHBfdHJwYyIsInNldF9uYW1lIjoib3ZiLmdhbGF4eS5hcHAifUIoCg9xcWxpdmVfcnNwX2hlYWQSFUIAShEInQIYq7uk/Ic0IMi9pPyHNEIeCg51c2VyX2FyZWFfY29kZRIMMTU2MDMzMzMwMTAwQhgKB3VzZXJfaXASDTYwLjE5MC4yNTMuNTg=';
   function shouldBlockRequest(reqBytes) {
     if (!reqBytes) return false;
@@ -431,19 +590,10 @@
     processResponseBody: processResponseBody,
     shouldBlockRequest: shouldBlockRequest,
     EMPTY_FRAME_B64: EMPTY_FRAME_B64,
+    inflateGzip: function (u8) { return inflateGzip(u8); },
     _b64decode: function (s) {
       // 纯 JS base64 解码（兼容任意 Loon 版本，不依赖 atob/$utils）
-      var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-      var out = [], buf = 0, bits = 0, i, c, idx;
-      for (i = 0; i < s.length; i++) {
-        c = s.charAt(i);
-        if (c === '=') break;
-        idx = chars.indexOf(c);
-        if (idx < 0) continue;
-        buf = (buf << 6) | idx; bits += 6;
-        if (bits >= 8) { bits -= 8; out.push((buf >> bits) & 0xff); }
-      }
-      return new Uint8Array(out);
+      return b64decodeBytes(s);
     },
     _b64encode: function (u8) {
       // 纯 JS base64 编码
@@ -474,6 +624,22 @@
   function log(msg) {
     try { if (typeof console !== 'undefined' && console.log) console.log('[QQLiveClean] ' + msg); } catch (e) {}
   }
+  function hexHead(u8, n) {
+    var out = '', i;
+    for (i = 0; i < n && i < u8.length; i++) {
+      var h = u8[i].toString(16);
+      if (h.length < 2) h = '0' + h;
+      out += h;
+    }
+    return out;
+  }
+  var DIAG_HITS = ['qqlive_rsp_head', 'user_center_ad_middle', 'GetTabListRsp', 'ad_block_', 'AdFeed', 'AdResponseInfo', 'InnerAdCommon', 'LoadingConfig'];
+  function detectHits(u8) {
+    var out = [], i;
+    for (i = 0; i < DIAG_HITS.length; i++) if (containsBytes(u8, utf8Bytes(DIAG_HITS[i]))) out.push(DIAG_HITS[i]);
+    return out.join(',');
+  }
+  function isGzip(u8) { return u8.length > 2 && u8[0] === 0x1f && u8[1] === 0x8b; }
 
   /* ============ Loon 桥接（IIFE 内，不依赖全局变量暴露） ============ */
   if (typeof $done !== 'undefined') {
@@ -482,16 +648,26 @@
       var _reqBody = (typeof $request !== 'undefined' && $request && $request.body) ? $request.body : null;
       if (typeof $response !== 'undefined' && $response && $response.body) {
         var _t0 = Date.now ? Date.now() : 0;
+        var _rbody = api._b64decode($response.body);
+        var _gzipIn = isGzip(_rbody);
+        log('resp len=' + _rbody.length + ' head=' + hexHead(_rbody, 12) + ' gzip=' + _gzipIn + ' hits=[' + detectHits(_rbody) + '] ' + _u);
         var _out = api.processResponse($response.body);
         if (_out && _out !== $response.body) {
           $response.body = _out;
-          log('response EDITED ' + (_t0 ? (Date.now() - _t0) + 'ms ' : '') + _u);
+          if (_gzipIn) {
+            try { delete $response.headers['content-encoding']; delete $response.headers['Content-Encoding']; delete $response.headers['content-length']; delete $response.headers['Content-Length']; } catch (e3) {}
+          }
+          log('response EDITED ' + (_t0 ? (Date.now() - _t0) + 'ms ' : '') + (_gzipIn ? '(decompressed+edited) ' : '') + _u);
           $done({ response: $response });
         } else {
           $done({});
         }
       } else {
-        var _blocked = _reqBody ? api.processRequest(_reqBody) : false;
+        var _reqRaw = _reqBody ? api._b64decode(_reqBody) : null;
+        var _reqGzip = _reqRaw ? isGzip(_reqRaw) : false;
+        if (_reqGzip) { _reqRaw = inflateGzip(_reqRaw); log('req gzip decompressed ' + (_reqRaw ? _reqRaw.length : 0) + 'B'); }
+        log('req len=' + (_reqRaw ? _reqRaw.length : 0) + ' head=' + (_reqRaw ? hexHead(_reqRaw, 12) : '-') + ' gzip=' + _reqGzip + ' ' + _u);
+        var _blocked = _reqRaw ? api.shouldBlockRequest(_reqRaw) : false;
         if (_blocked) {
           log('request BLOCKED (ad api) ' + _u);
           $done({ response: { status: 200, headers: { 'content-type': 'application/octet-stream' }, body: api.EMPTY_FRAME_B64 } });
