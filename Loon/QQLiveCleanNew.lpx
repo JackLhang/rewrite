@@ -12,32 +12,33 @@
 [General]
 
 [URL Rewrite]
-# ---- 腾讯广告 SDK / 广告素材 / 广告统计（修正为 Loon 标准 reject_dict(200)）----
-^https?:\/\/iacc\.qq\.com reject_dict(200)
-^https?:\/\/iacc\.rec\.qq\.com reject_dict(200)
-^https?:\/\/rdelivery\.qq\.com reject_dict(200)
-^https?:\/\/cloud\.tgpa\.qq\.com reject_dict(200)
-^https?:\/\/hc\.tdm\.qq\.com reject_dict(200)
-^https?:\/\/receiver\.tdm\.qq\.com reject_dict(200)
-^https?:\/\/disp-qryapi\.3g\.qq\.com reject_dict(200)
-^https?:\/\/playproxy\.video\.qq\.com\/monet reject_dict(200)
-^https?:\/\/vip\.video\.qq\.com\/rpc\/trpc\.vip_ad_promotion\. reject_dict(200)
-^https?:\/\/pgdt\.gtimg\.cn reject_dict(200)
-^https?:\/\/pgdt\.gtimg\.com reject_dict(200)
-^https?:\/\/gdtimg\.cn reject_dict(200)
+# ---- 腾讯广告 SDK / 广告素材 / 广告统计 ----
+request if ${url} ~= /^https?:\/\/iacc\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/iacc\.rec\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/rdelivery\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/cloud\.tgpa\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/hc\.tdm\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/receiver\.tdm\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/disp-qryapi\.3g\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/playproxy\.video\.qq\.com\/monet.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/vip\.video\.qq\.com\/rpc\/trpc\.vip_ad_promotion\..*/i then reject(200)
+request if ${url} ~= /^https?:\/\/pgdt\.gtimg\.cn\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/pgdt\.gtimg\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/gdtimg\.cn\/.*/i then reject(200)
+
 # ---- 埋点 / 遥测上报 ----
-^https?:\/\/galileotelemetry\.tencent\.com reject_dict(200)
-^https?:\/\/beacon\.cdn\.qq\.com reject_dict(200)
-^https?:\/\/aegis\.cdn-go\.cn reject_dict(200)
-^https?:\/\/rumt-zh\.com reject_dict(200)
-^https?:\/\/trace\.inlong\.qq\.com reject_dict(200)
-^https?:\/\/szmg\.qq\.com reject_dict(200)
-^https?:\/\/snowflake\.qq\.com reject_dict(200)
+request if ${url} ~= /^https?:\/\/galileotelemetry\.tencent\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/beacon\.cdn\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/aegis\.cdn-go\.cn\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/rumt-zh\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/trace\.inlong\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/szmg\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/snowflake\.qq\.com\/.*/i then reject(200)
 
 [Script]
 # 增强了正则容错率，确保任何携带参数的网关请求都能正确触发 JS
-http-request ^https?:\/\/i\.video\.qq\.com script-path=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js, requires-body=true, timeout=10, tag=QQLive_adapi
-http-response ^https?:\/\/i\.video\.qq\.com script-path=https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js, requires-body=true, timeout=15, tag=QQLive_clean
+request if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="QQLive_adapi", timeout=10, requires_body=true
+response if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="QQLive_clean", timeout=15, requires_body=true
 
 [MITM]
 hostname = i.video.qq.com, iacc.qq.com, iacc.rec.qq.com, rdelivery.qq.com, cloud.tgpa.qq.com, hc.tdm.qq.com, receiver.tdm.qq.com, disp-qryapi.3g.qq.com, playproxy.video.qq.com, vip.video.qq.com, pgdt.gtimg.cn, pgdt.gtimg.com, gdtimg.cn, galileotelemetry.tencent.com, beacon.cdn.qq.com, aegis.cdn-go.cn, rumt-zh.com, trace.inlong.qq.com, szmg.qq.com, snowflake.qq.com
