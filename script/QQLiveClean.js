@@ -2,7 +2,7 @@
  * QQLiveClean.js — 腾讯视频 iOS（v9.x / MVL 布局）去广告 + 个人中心与 Tab 精简
  * 运行环境: Loon Script (http-request / http-response)
  * 实现: 无损 protobuf 子树删除（wire-format 级，不解析业务 schema）
- * date: 2026-09-09 16:49:18
+ * date:2026-09-09 17:45:22
  */
 (function (global) {
   'use strict';
@@ -11,13 +11,15 @@
   var CFG = {
     DIAG_NOTIFY: true,          // 诊断期：处理动作弹系统通知（验证完可改 false）
     NOTIFY_INTERVAL_MS: 20000,  // 同类通知限频（毫秒）
-    // 底部 Tab 栏要删除的条目标题（f3 字段值）。默认去掉「短剧」「好物」两个运营 tab
-    removeTabs: ['短剧', '好物'],
+    // 底部 Tab 栏要删除的条目标题（f3 字段值）。默认去掉「短剧」「好物/好片」两个运营 tab
+    removeTabs: ['短剧', '好物', '好片'],
     // 个人中心 VIP 营销推广卡标题（user_info 卡组内）
     removeVipPromoTitles: ['特惠升级SVIP', '新人16元看比赛', 'JUMP卡上新', '年轻人专属会员', '优惠宽带送VIP'],
     // 更多功能/顶部功能里要移除的运营推广项（按标题或 key 匹配）
-    removeOpTitles: ['游戏福利', 'GOODS商城', '免费看漫剧', '免费领会员', '摸鱼免费玩'],
+    removeOpTitles: ['游戏福利', 'GOODS商城', '免费看漫剧', '免费领会员', '摸鱼免费玩', '我的游戏', '爱玩游戏', '免流量领会员', '领权益送会员'],
     removeOpKeys: ['game', 'goods', 'operation_position', 'resource_icon', 'aibot'],
+    // 运营配置接口（纯 protobuf 配置响应）中要删除的 JSON 菜单键（键名即个人中心入口文案）
+    configRemoveKeys: ['我的游戏', '爱玩游戏', '免流量领会员', '领权益送会员'],
     // 个人中心整模块删除（广告位）
     removeModules: ['user_center_ad_middle'],
     // 请求体含以下方法名的 i.video.qq.com 请求 → 直接返回空帧（广告类接口）
@@ -216,15 +218,16 @@
   }
   function predOpItem(seg) {
     if (!isCardLike(seg)) return false;
-    var strs = topStrs(seg), i, hasCJK = false, gameUrl = false;
+    var strs = topStrs(seg), i, j, hasCJK = false, gameUrl = false, magicUrl = false;
     for (i = 0; i < strs.length; i++) {
       if (inList(strs[i], CFG.removeOpTitles)) return true;
       if (containsChinese(strs[i])) hasCJK = true;
       if (strs[i].indexOf('iwan.qq.com/g/') >= 0) gameUrl = true;   // 游戏中心入口
+      if (strs[i].indexOf('magic-act') >= 0) magicUrl = true;       // 营销活动 H5（免流量领会员/领权益送会员）
     }
     if (hasCJK) {
       for (i = 0; i < strs.length; i++) if (inList(strs[i], CFG.removeOpKeys)) return true;
-      if (gameUrl) return true;
+      if (gameUrl || magicUrl) return true;
     }
     return false;
   }
@@ -361,6 +364,77 @@
     }
     return concatParts(parts, total);
   }
+  /* ============ 运营配置响应（纯 protobuf 无 tRPC 帧）JSON 菜单键删除 ============ */
+  function bytesToLatin1(u8) {
+    var s = '', i, chunk = 8192, seg;
+    for (i = 0; i < u8.length; i += chunk) {
+      seg = u8.subarray ? u8.subarray(i, Math.min(i + chunk, u8.length)) : u8.slice(i, Math.min(i + chunk, u8.length));
+      s += String.fromCharCode.apply(null, seg);
+    }
+    return s;
+  }
+  function latin1ToBytes(s) {
+    var out = new Uint8Array(s.length), i;
+    for (i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xff;
+    return out;
+  }
+  function stripJsonKeys(latin) {
+    // latin: JSON 对象字符串（latin1/UTF-8 字节视图）。删除 CFG.configRemoveKeys 中的键值对
+    if (!latin || latin.charAt(0) !== '{') return null;
+    var out = latin, i, keyLat, re, prev;
+    for (i = 0; i < CFG.configRemoveKeys.length; i++) {
+      keyLat = bytesToLatin1(utf8Bytes(CFG.configRemoveKeys[i]));
+      re = new RegExp('"' + keyLat + '"\\s*:\\s*"(?:[^"\\\\]|\\\\.)*",?', 'g');
+      out = out.replace(re, '');
+    }
+    if (out === latin) return null;
+    // 清理残留逗号（",}" → "}" 等）
+    out = out.replace(/,\s*([}\]])/g, '$1');
+    out = out.replace(/^\s*,/, '');
+    return out;
+  }
+  function editAnyFieldJson(seg, depth) {
+    if (depth > 8 || seg.length > 3000000) return null;
+    var fs = parseFull(seg, 0, seg.length);
+    if (!fs) return null;
+    var parts = [], total = 0, changed = false, i, x, raw, s, ns, sub;
+    for (i = 0; i < fs.length; i++) {
+      x = fs[i];
+      if (x.wt === 2) {
+        if (x.data.length > 0 && x.data[0] === 0x7b) {  // '{'
+          s = bytesToLatin1(x.data);
+          ns = stripJsonKeys(s);
+          if (ns !== null) {
+            raw = encodeField(x.f, latin1ToBytes(ns), 2);
+            parts.push(raw); total += raw.length; changed = true;
+            continue;
+          }
+        }
+        sub = editAnyFieldJson(x.data, depth + 1);
+        if (sub) {
+          raw = encodeField(x.f, sub, 2);
+          parts.push(raw); total += raw.length; changed = true;
+          continue;
+        }
+        raw = rawSlice(seg, x.start, x.end);
+        parts.push(raw); total += raw.length;
+      } else {
+        raw = rawSlice(seg, x.start, x.end);
+        parts.push(raw); total += raw.length;
+      }
+    }
+    if (!changed) return null;
+    return concatParts(parts, total);
+  }
+  function editConfigJson(body) {
+    var hit = false, i;
+    for (i = 0; i < CFG.configRemoveKeys.length; i++) {
+      if (containsBytes(body, utf8Bytes(CFG.configRemoveKeys[i]))) { hit = true; break; }
+    }
+    if (!hit) return null;
+    return editAnyFieldJson(body, 0);
+  }
+
   function processResponseBody(body) {
     if (!body || body.length < 30) return null;
     if (isGzip(body)) {
@@ -369,7 +443,10 @@
       body = plain;
     }
     var anchor = bodyAnchor(body);
-    if (anchor < 0) return null;
+    if (anchor < 0) {
+      // 无 tRPC 帧：可能是运营配置接口（纯 protobuf，菜单以 JSON 键值下发）
+      return editConfigJson(body);
+    }
     var newBody = null;
     if (containsBytes(body, utf8Bytes('GetTabListRsp'))) {
       // tab 栏精简
@@ -692,10 +769,11 @@ function inflateGzip(src) {
           try {
             if (!$response.headers) $response.headers = {};
             $response.headers['X-QQLive-Clean'] = '1';
+            // 输出始终为明文 protobuf：无条件移除压缩/长度头（Loon 传给脚本的 body 可能已解压，
+            // 但 headers 仍保留 content-encoding: gzip，若不清除客户端会按 gzip 解压明文而失败 → 网络错误）
+            delete $response.headers['content-encoding']; delete $response.headers['Content-Encoding'];
+            delete $response.headers['content-length']; delete $response.headers['Content-Length'];
           } catch (e3) {}
-          if (_gzipIn) {
-            try { delete $response.headers['content-encoding']; delete $response.headers['Content-Encoding']; delete $response.headers['content-length']; delete $response.headers['Content-Length']; } catch (e4) {}
-          }
           log('response EDITED ' + (_t0 ? (Date.now() - _t0) + 'ms ' : '') + (_gzipIn ? '(decompressed+edited) ' : '') + _u);
           notify('resp', '已精简 ' + Math.round($response.body.length / 1024) + 'KB', _u);
           $done({ response: $response });
