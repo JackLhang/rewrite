@@ -7,35 +7,35 @@
 #!tag=去广告
 #!system=ios
 #!version=1.0.0
-#!date=2026-09-09 13:43:38
+#!date=2026-09-09 14:01:38
 
-[General]
-
-
-[Rewrite]
-# ---- 腾讯广告 SDK / 广告素材 / 广告统计（整域或整路径 reject-200，返回空 200 不触发重试）----
-request if ${url} ~= /^https?:\//iacc\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//iacc\.rec\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//rdelivery\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//cloud\.tgpa\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//hc\.tdm\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//receiver\.tdm\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//disp-qryapi\.3g\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//playproxy\.video\.qq\.com\/monet.*/i then reject(200)
-request if ${url} ~= /^https?:\//vip\.video\.qq\.com\/rpc\/trpc\.vip_ad_promotion\..*/i then reject(200)
-request if ${url} ~= /^https?:\//pgdt\.gtimg\.cn\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//pgdt\.gtimg\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//gdtimg\.cn\/.*/i then reject(200)
-# ---- 埋点 / 遥测上报（不影响任何功能，默认开启以省电省流量；如遇问题可整行注释）----
-request if ${url} ~= /^https?:\//galileotelemetry\.tencent\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//beacon\.cdn\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//aegis\.cdn-go\.cn\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//rumt-zh\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//trace\.inlong\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//szmg\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\//snowflake\.qq\.com\/.*/i then reject(200)
 
 #复写
+[Rewrite]
+# ---- 腾讯广告 SDK / 广告素材 / 广告统计 ----
+request if ${url} ~= /^https?:\/\/iacc\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/iacc\.rec\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/rdelivery\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/cloud\.tgpa\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/hc\.tdm\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/receiver\.tdm\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/disp-qryapi\.3g\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/playproxy\.video\.qq\.com\/monet.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/vip\.video\.qq\.com\/rpc\/trpc\.vip_ad_promotion\..*/i then reject(200)
+request if ${url} ~= /^https?:\/\/pgdt\.gtimg\.cn\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/pgdt\.gtimg\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/gdtimg\.cn\/.*/i then reject(200)
+
+# ---- 埋点 / 遥测上报 ----
+request if ${url} ~= /^https?:\/\/galileotelemetry\.tencent\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/beacon\.cdn\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/aegis\.cdn-go\.cn\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/rumt-zh\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/trace\.inlong\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/szmg\.qq\.com\/.*/i then reject(200)
+request if ${url} ~= /^https?:\/\/snowflake\.qq\.com\/.*/i then reject(200)
+
+#脚本
 [Script]
 request if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_adapi", timeout=10, requires_body=true
 response if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_clean", timeout=15, requires_body=true
