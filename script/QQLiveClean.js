@@ -2,13 +2,15 @@
  * QQLiveClean.js — 腾讯视频 iOS（v9.x / MVL 布局）去广告 + 个人中心与 Tab 精简
  * 运行环境: Loon Script (http-request / http-response)
  * 实现: 无损 protobuf 子树删除（wire-format 级，不解析业务 schema）
- * date: 2026-09-09 16:32:11
+ * date: 2026-09-09 16:49:18
  */
 (function (global) {
   'use strict';
 
   /* ============ 可配置规则 ============ */
   var CFG = {
+    DIAG_NOTIFY: true,          // 诊断期：处理动作弹系统通知（验证完可改 false）
+    NOTIFY_INTERVAL_MS: 20000,  // 同类通知限频（毫秒）
     // 底部 Tab 栏要删除的条目标题（f3 字段值）。默认去掉「短剧」「好物」两个运营 tab
     removeTabs: ['短剧', '好物'],
     // 个人中心 VIP 营销推广卡标题（user_info 卡组内）
@@ -625,6 +627,36 @@ function inflateGzip(src) {
   function log(msg) {
     try { if (typeof console !== 'undefined' && console.log) console.log('[QQLiveClean] ' + msg); } catch (e) {}
   }
+  var SCRIPT_VERSION = '1.1.1';
+  /* 系统通知（带外验证通道）：Loon 主日志可能不显示脚本 console.log，
+     通知横幅可 100% 确认脚本是否运行 / 加载的是哪个版本 */
+  var _notifyTs = {};
+  function notify(kind, title, msg) {
+    try {
+      if (!CFG.DIAG_NOTIFY) return;
+      var now = Date.now ? Date.now() : 0;
+      var last = _notifyTs[kind] || 0;
+      if (now - last < CFG.NOTIFY_INTERVAL_MS) return;
+      _notifyTs[kind] = now;
+      var t = '[QQLive' + SCRIPT_VERSION + '] ' + title;
+      if (typeof $notification !== 'undefined' && $notification && $notification.post) {
+        $notification.post(t, '', msg);
+      }
+    } catch (e) {}
+  }
+  function notifyOnce(key, title, msg) {
+    /* persistentStore 去重：跨执行只通知一次（用于“脚本已加载 vX”提示） */
+    try {
+      if (typeof $persistentStore !== 'undefined' && $persistentStore) {
+        var v = $persistentStore.read('QQLiveNotifyVersion');
+        if (v === key) return;
+        if ($persistentStore.write) $persistentStore.write(key, 'QQLiveNotifyVersion');
+        notify('version', title, msg);
+      } else {
+        notify('version', title, msg);
+      }
+    } catch (e) {}
+  }
   function hexHead(u8, n) {
     var out = '', i;
     for (i = 0; i < n && i < u8.length; i++) {
@@ -645,32 +677,41 @@ function inflateGzip(src) {
   /* ============ Loon 桥接（IIFE 内，不依赖全局变量暴露） ============ */
   if (typeof $done !== 'undefined') {
     try {
+      try { notifyOnce('1.1.1', 'QQLiveClean v1.1.1 已加载', '脚本已生效（若您未看到此通知，说明安装的是旧版脚本）'); } catch (e) {}
       var _u = (typeof $request !== 'undefined' && $request && $request.url) ? $request.url : '';
       var _reqBody = (typeof $request !== 'undefined' && $request && $request.body) ? $request.body : null;
       if (typeof $response !== 'undefined' && $response && $response.body) {
         var _t0 = Date.now ? Date.now() : 0;
         var _rbody = api._b64decode($response.body);
+        if (!_rbody || _rbody.length === 0) notify('empty', '响应 body 为空(Loon 未传 body)', _u);
         var _gzipIn = isGzip(_rbody);
         log('resp len=' + _rbody.length + ' head=' + hexHead(_rbody, 12) + ' gzip=' + _gzipIn + ' hits=[' + detectHits(_rbody) + '] ' + _u);
         var _out = api.processResponse($response.body);
         if (_out && _out !== $response.body) {
           $response.body = _out;
+          try {
+            if (!$response.headers) $response.headers = {};
+            $response.headers['X-QQLive-Clean'] = '1';
+          } catch (e3) {}
           if (_gzipIn) {
-            try { delete $response.headers['content-encoding']; delete $response.headers['Content-Encoding']; delete $response.headers['content-length']; delete $response.headers['Content-Length']; } catch (e3) {}
+            try { delete $response.headers['content-encoding']; delete $response.headers['Content-Encoding']; delete $response.headers['content-length']; delete $response.headers['Content-Length']; } catch (e4) {}
           }
           log('response EDITED ' + (_t0 ? (Date.now() - _t0) + 'ms ' : '') + (_gzipIn ? '(decompressed+edited) ' : '') + _u);
+          notify('resp', '已精简 ' + Math.round($response.body.length / 1024) + 'KB', _u);
           $done({ response: $response });
         } else {
           $done({});
         }
       } else {
         var _reqRaw = _reqBody ? api._b64decode(_reqBody) : null;
+        if (_reqBody && (!_reqRaw || _reqRaw.length === 0)) notify('empty', '请求 body 为空(Loon 未传 body)', _u);
         var _reqGzip = _reqRaw ? isGzip(_reqRaw) : false;
         if (_reqGzip) { _reqRaw = inflateGzip(_reqRaw); log('req gzip decompressed ' + (_reqRaw ? _reqRaw.length : 0) + 'B'); }
         log('req len=' + (_reqRaw ? _reqRaw.length : 0) + ' head=' + (_reqRaw ? hexHead(_reqRaw, 12) : '-') + ' gzip=' + _reqGzip + ' ' + _u);
         var _blocked = _reqRaw ? api.shouldBlockRequest(_reqRaw) : false;
         if (_blocked) {
           log('request BLOCKED (ad api) ' + _u);
+          notify('req', '广告接口已拦截', _u);
           $done({ response: { status: 200, headers: { 'content-type': 'application/octet-stream' }, body: api.EMPTY_FRAME_B64 } });
         } else {
           $done({});
