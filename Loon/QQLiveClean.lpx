@@ -7,7 +7,7 @@
 #!tag=去广告
 #!system=ios
 #!version=1.0.0
-#!date=2026-09-10 13:05:38
+#!date=2026-09-10 13:25:38
 
 
 #复写
@@ -37,7 +37,7 @@ request if ${url} ~= /^https?:\/\/snowflake\.qq\.com\/.*/i then reject(200)
 
 #脚本
 [Script]
-# request if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_adapi", timeout=10, requires_body=true
+request if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_adapi", timeout=10, requires_body=true
 response if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_clean", timeout=15, requires_body=true
 
 [MITM]
