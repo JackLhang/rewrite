@@ -2,15 +2,17 @@
  * QQLiveClean.js — 腾讯视频 iOS（v9.x / MVL 布局）去广告 + 个人中心与 Tab 精简
  * 运行环境: Loon Script (http-request / http-response)
  * 实现: 无损 protobuf 子树删除（wire-format 级，不解析业务 schema）
- * date:2026-09-10 13:35:31
+ * date:2026-09-10 13:59:31
  */
+ 
 (function (global) {
   'use strict';
 
   /* ============ 可配置规则 ============ */
   var CFG = {
     DIAG_NOTIFY: true,          // 诊断期：处理动作弹系统通知（验证完可改 false）
-    NOTIFY_INTERVAL_MS: 20000,  // 同类通知限频（毫秒）
+    NOTIFY_INTERVAL_MS: 20000,  // 动作通知限频（毫秒）
+    DIAG_NOTIFY_INTERVAL_MS: 10000, // 诊断通知限频（毫秒）
     // 底部 Tab 栏要删除的条目标题（f3 字段值）。默认去掉「短剧」「好物/好片」两个运营 tab
     removeTabs: ['短剧', '好物', '好片'],
     // 个人中心 VIP 营销推广卡标题（user_info 卡组内）
@@ -708,12 +710,13 @@ function inflateGzip(src) {
   /* 系统通知（带外验证通道）：Loon 主日志可能不显示脚本 console.log，
      通知横幅可 100% 确认脚本是否运行 / 加载的是哪个版本 */
   var _notifyTs = {};
-  function notify(kind, title, msg) {
+  function notify(kind, title, msg, intervalMs) {
     try {
       if (!CFG.DIAG_NOTIFY) return;
       var now = Date.now ? Date.now() : 0;
       var last = _notifyTs[kind] || 0;
-      if (now - last < CFG.NOTIFY_INTERVAL_MS) return;
+      var iv = intervalMs || CFG.NOTIFY_INTERVAL_MS;
+      if (now - last < iv) return;
       _notifyTs[kind] = now;
       var t = '[QQLive' + SCRIPT_VERSION + '] ' + title;
       if (typeof $notification !== 'undefined' && $notification && $notification.post) {
@@ -764,6 +767,7 @@ function inflateGzip(src) {
         var _gzipIn = isGzip(_rbody);
         log('resp len=' + _rbody.length + ' head=' + hexHead(_rbody, 12) + ' gzip=' + _gzipIn + ' hits=[' + detectHits(_rbody) + '] ' + _u);
         var _out = api.processResponse($response.body);
+        notify('diag', 'RESP len=' + _rbody.length + ' gzip=' + (_gzipIn ? 1 : 0), 'hits=[' + detectHits(_rbody) + '] ' + ((_out && _out !== $response.body) ? 'EDITED' : 'pass'), CFG.DIAG_NOTIFY_INTERVAL_MS);
         if (_out && _out !== $response.body) {
           $response.body = _out;
           try {
@@ -787,6 +791,7 @@ function inflateGzip(src) {
         if (_reqGzip) { _reqRaw = inflateGzip(_reqRaw); log('req gzip decompressed ' + (_reqRaw ? _reqRaw.length : 0) + 'B'); }
         log('req len=' + (_reqRaw ? _reqRaw.length : 0) + ' head=' + (_reqRaw ? hexHead(_reqRaw, 12) : '-') + ' gzip=' + _reqGzip + ' ' + _u);
         var _blocked = _reqRaw ? api.shouldBlockRequest(_reqRaw) : false;
+        notify('diag', 'REQ len=' + (_reqRaw ? _reqRaw.length : 0) + ' gzip=' + (_reqGzip ? 1 : 0), (_blocked ? 'BLOCK' : 'pass'), CFG.DIAG_NOTIFY_INTERVAL_MS);
         if (_blocked) {
           log('request BLOCKED (ad api) ' + _u);
           notify('req', '广告接口已拦截', _u);
@@ -803,3 +808,4 @@ function inflateGzip(src) {
 })(typeof globalThis !== 'undefined' ? globalThis
     : (typeof self !== 'undefined' ? self
     : (typeof window !== 'undefined' ? window : {})));
+
