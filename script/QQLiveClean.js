@@ -2,9 +2,9 @@
  * QQLiveClean.js — 腾讯视频 iOS（v9.x / MVL 布局）去广告 + 个人中心与 Tab 精简
  * 运行环境: Loon Script (http-request / http-response)
  * 实现: 无损 protobuf 子树删除（wire-format 级，不解析业务 schema）
- * date:2026-09-10 13:59:31
+ * date:2026-09-10 15:17:31
  */
- 
+
 (function (global) {
   'use strict';
 
@@ -510,6 +510,54 @@
     return out;
   }
 
+/* 纯 JS gzip(stored 块) 打包：输出合法 gzip 但内容未压缩（RFC1950/1951 stored blocks）。
+   用途：Loon 转发「脚本编辑后的响应」时可能保留原始 content-encoding: gzip 头，
+   若直接给明文客户端会解压失败 → 网络错误。输出 stored-gzip 与 gzip 头自洽，
+   客户端可正常解压出 protobuf。 */
+var CRC_TABLE = null;
+function crc32(u8) {
+  if (!CRC_TABLE) {
+    CRC_TABLE = new Int32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      CRC_TABLE[n] = c;
+    }
+  }
+  var crc = -1, i;
+  for (i = 0; i < u8.length; i++) crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ u8[i]) & 0xff];
+  return (crc ^ -1) >>> 0;
+}
+function gzipStored(u8) {
+  var parts = [], blocks = Math.max(1, Math.ceil(u8.length / 65535)), i, pos = 0, len, j, crc, isize;
+  // gzip 头：magic(2) CM=8(1) FLG=0(1) MTIME(4) XFL=0(1) OS=255(1)
+  parts.push(new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff]));
+  for (i = 0; i < blocks; i++) {
+    len = Math.min(65535, u8.length - pos);
+    var last = (i === blocks - 1) ? 1 : 0;
+    var head = new Uint8Array(5);
+    head[0] = last;                    // BFINAL + BTYPE=00(stored)
+    head[1] = len & 0xff;              // LEN 小端
+    head[2] = (len >> 8) & 0xff;
+    head[3] = (~len) & 0xff;           // NLEN = ~LEN 小端
+    head[4] = ((~len) >> 8) & 0xff;
+    parts.push(head);
+    parts.push(u8.subarray(pos, pos + len));
+    pos += len;
+  }
+  crc = crc32(u8);
+  isize = u8.length >>> 0;
+  var tail = new Uint8Array(8);
+  tail[0] = crc & 0xff; tail[1] = (crc >> 8) & 0xff; tail[2] = (crc >> 16) & 0xff; tail[3] = (crc >>> 24) & 0xff;
+  tail[4] = isize & 0xff; tail[5] = (isize >> 8) & 0xff; tail[6] = (isize >> 16) & 0xff; tail[7] = (isize >>> 24) & 0xff;
+  parts.push(tail);
+  var total = 0;
+  for (i = 0; i < parts.length; i++) total += parts[i].length;
+  var out = new Uint8Array(total), p = 0;
+  for (i = 0; i < parts.length; i++) { out.set(parts[i], p); p += parts[i].length; }
+  return out;
+}
+
 /* 纯 JS gzip inflate（RFC1950/1951），ES5 无依赖。返回 Uint8Array 或 null */
 function inflateGzip(src) {
   if (!src || src.length < 18 || src[0] !== 0x1f || src[1] !== 0x8b || src[2] !== 8) return null;
@@ -673,6 +721,8 @@ function inflateGzip(src) {
     shouldBlockRequest: shouldBlockRequest,
     EMPTY_FRAME_B64: EMPTY_FRAME_B64,
     inflateGzip: function (u8) { return inflateGzip(u8); },
+    gzipStored: function (u8) { return gzipStored(u8); },
+    crc32: function (u8) { return crc32(u8); },
     _b64decode: function (s) {
       // 纯 JS base64 解码（兼容任意 Loon 版本，不依赖 atob/$utils）
       return b64decodeBytes(s);
@@ -706,7 +756,7 @@ function inflateGzip(src) {
   function log(msg) {
     try { if (typeof console !== 'undefined' && console.log) console.log('[QQLiveClean] ' + msg); } catch (e) {}
   }
-  var SCRIPT_VERSION = '1.2';
+  var SCRIPT_VERSION = '1.3';
   /* 系统通知（带外验证通道）：Loon 主日志可能不显示脚本 console.log，
      通知横幅可 100% 确认脚本是否运行 / 加载的是哪个版本 */
   var _notifyTs = {};
@@ -757,7 +807,7 @@ function inflateGzip(src) {
   /* ============ Loon 桥接（IIFE 内，不依赖全局变量暴露） ============ */
   if (typeof $done !== 'undefined') {
     try {
-      try { notifyOnce('1.2', 'QQLiveClean v1.2 已加载', '脚本已生效（若您未看到此通知，说明安装的是旧版脚本）'); } catch (e) {}
+      try { notifyOnce('1.3', 'QQLiveClean v1.3 已加载', '脚本已生效（若您未看到此通知，说明安装的是旧版脚本）'); } catch (e) {}
       var _u = (typeof $request !== 'undefined' && $request && $request.url) ? $request.url : '';
       var _reqBody = (typeof $request !== 'undefined' && $request && $request.body) ? $request.body : null;
       if (typeof $response !== 'undefined' && $response && $response.body) {
@@ -769,15 +819,22 @@ function inflateGzip(src) {
         var _out = api.processResponse($response.body);
         notify('diag', 'RESP len=' + _rbody.length + ' gzip=' + (_gzipIn ? 1 : 0), 'hits=[' + detectHits(_rbody) + '] ' + ((_out && _out !== $response.body) ? 'EDITED' : 'pass'), CFG.DIAG_NOTIFY_INTERVAL_MS);
         if (_out && _out !== $response.body) {
-          $response.body = _out;
           try {
-            if (!$response.headers) $response.headers = {};
+            var _ce = null, _hdrs = $response.headers || {};
+            if (_hdrs['content-encoding']) _ce = _hdrs['content-encoding'];
+            else if (_hdrs['Content-Encoding']) _ce = _hdrs['Content-Encoding'];
+            var _edited = api._b64decode(_out);
+            if (_ce && String(_ce).toLowerCase().indexOf('gzip') >= 0) {
+              // 响应头保留 content-encoding: gzip：输出合法 gzip（stored 块），客户端解压后即 protobuf
+              $response.body = api._b64encode(gzipStored(_edited));
+            } else {
+              // 原始响应未压缩：直接输出明文
+              $response.body = _out;
+            }
             $response.headers['X-QQLive-Clean'] = '1';
-            // 输出始终为明文 protobuf：无条件移除压缩/长度头（Loon 传给脚本的 body 可能已解压，
-            // 但 headers 仍保留 content-encoding: gzip，若不清除客户端会按 gzip 解压明文而失败 → 网络错误）
-            delete $response.headers['content-encoding']; delete $response.headers['Content-Encoding'];
-            delete $response.headers['content-length']; delete $response.headers['Content-Length'];
-          } catch (e3) {}
+          } catch (e3) {
+            $response.body = _out;
+          }
           log('response EDITED ' + (_t0 ? (Date.now() - _t0) + 'ms ' : '') + (_gzipIn ? '(decompressed+edited) ' : '') + _u);
           notify('resp', '已精简 ' + Math.round($response.body.length / 1024) + 'KB', _u);
           $done({ response: $response });
@@ -808,4 +865,3 @@ function inflateGzip(src) {
 })(typeof globalThis !== 'undefined' ? globalThis
     : (typeof self !== 'undefined' ? self
     : (typeof window !== 'undefined' ? window : {})));
-
