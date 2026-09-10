@@ -7,7 +7,7 @@
 #!tag=去广告
 #!system=ios
 #!version=1.0.0
-#!date=2026-09-09 14:01:38
+#!date=2026-09-10 14:58:38
 
 
 #复写
@@ -37,8 +37,8 @@ request if ${url} ~= /^https?:\/\/snowflake\.qq\.com\/.*/i then reject(200)
 
 #脚本
 [Script]
-request if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_adapi", timeout=10, requires_body=true
-response if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_clean", timeout=15, requires_body=true
+# request if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_adapi", timeout=10, requires_body=true
+# response if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_clean", timeout=15, requires_body=true
 
 [MITM]
 hostname = i.video.qq.com, iacc.qq.com, iacc.rec.qq.com, rdelivery.qq.com, cloud.tgpa.qq.com, hc.tdm.qq.com, receiver.tdm.qq.com, disp-qryapi.3g.qq.com, playproxy.video.qq.com, vip.video.qq.com, pgdt.gtimg.cn, pgdt.gtimg.com, gdtimg.cn, galileotelemetry.tencent.com, beacon.cdn.qq.com, aegis.cdn-go.cn, rumt-zh.com, trace.inlong.qq.com, szmg.qq.com, snowflake.qq.com
