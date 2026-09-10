@@ -2,7 +2,7 @@
  * QQLiveClean.js — 腾讯视频 iOS（v9.x / MVL 布局）去广告 + 个人中心与 Tab 精简
  * 运行环境: Loon Script (http-request / http-response)
  * 实现: 无损 protobuf 子树删除（wire-format 级，不解析业务 schema）
- * date:2026-09-09 17:45:22
+ * date:2026-09-10 13:35:31
  */
 (function (global) {
   'use strict';
@@ -704,7 +704,7 @@ function inflateGzip(src) {
   function log(msg) {
     try { if (typeof console !== 'undefined' && console.log) console.log('[QQLiveClean] ' + msg); } catch (e) {}
   }
-  var SCRIPT_VERSION = '1.1.1';
+  var SCRIPT_VERSION = '1.2';
   /* 系统通知（带外验证通道）：Loon 主日志可能不显示脚本 console.log，
      通知横幅可 100% 确认脚本是否运行 / 加载的是哪个版本 */
   var _notifyTs = {};
@@ -754,7 +754,7 @@ function inflateGzip(src) {
   /* ============ Loon 桥接（IIFE 内，不依赖全局变量暴露） ============ */
   if (typeof $done !== 'undefined') {
     try {
-      try { notifyOnce('1.1.1', 'QQLiveClean v1.1.1 已加载', '脚本已生效（若您未看到此通知，说明安装的是旧版脚本）'); } catch (e) {}
+      try { notifyOnce('1.2', 'QQLiveClean v1.2 已加载', '脚本已生效（若您未看到此通知，说明安装的是旧版脚本）'); } catch (e) {}
       var _u = (typeof $request !== 'undefined' && $request && $request.url) ? $request.url : '';
       var _reqBody = (typeof $request !== 'undefined' && $request && $request.body) ? $request.body : null;
       if (typeof $response !== 'undefined' && $response && $response.body) {
