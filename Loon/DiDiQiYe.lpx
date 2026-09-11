@@ -1,0 +1,13 @@
+#!name=滴滴企业版去广告
+#!desc=滴滴企业版4.14.0去广告精简：移除首页机票下方广告（商旅横幅/机酒大促）、活动卡片区（积分商城/领券包/用车制度）与权益抢先知卡片，移除小福包Tab；行程/工作台为App原生Tab无法移除。若无效请检查Loon MitM开关与证书
+#!author=Agentic Builder
+#!date=2026-09-11 14:35:00
+
+[Rewrite]
+response if ${url} ~= /^https:\/\/eos-marketing\.es\.xiaojukeji\.com\/api\/eos\/promotion\/batchList\/v1\?/i then response.json.jq(".data |= map(select(.promotion_position_mark!= \"es_app_home_banner\" and .promotion_position_mark!= \"es_app_index_activity_banner\" and .promotion_position_mark!= \"es_app_index_activity_point_banner\"))")
+response if ${url} ~= /^https:\/\/eos-marketing\.es\.xiaojukeji\.com\/api\/eos\/promotion\/list\/v4\?/i then response.json.jq(".data = []")
+response if ${url} ~= /^https:\/\/eos-marketing\.es\.xiaojukeji\.com\/api\/eos\/promotion\/list\/v3\?/i then response.json.jq(".data = []")
+response if ${url} ~= /^https:\/\/esapp\.xiaojukeji\.com\/category\/home\/getEntrance\?/i then response.json.jq(".data.operation_panel_module = null")
+
+[Mitm]
+hostname = eos-marketing.es.xiaojukeji.com, esapp.xiaojukeji.com
