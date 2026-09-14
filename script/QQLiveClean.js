@@ -2,9 +2,349 @@
  * QQLiveClean.js — 腾讯视频 iOS（v9.x / MVL 布局）去广告 + 个人中心与 Tab 精简
  * 运行环境: Loon Script (http-request / http-response)
  * 实现: 无损 protobuf 子树删除（wire-format 级，不解析业务 schema）
- * date:2026-09-10 15:17:31
+ * date:2026-09-14 17:17:31
  */
-$done({});
+// ============================================================
+// 腾讯视频去广告 / 界面精简  (适配 iOS 9.04.46.25021)
+// 适用：Surge / Loon / Stash（响应脚本需 opens binary-body-mode）
+// 功能：
+//   1) vv.video.qq.com / vv6.video.qq.com getvinfo/batchvinfo
+//      请求参数改写（sppreviewtype/spsrt -> 0，去贴片/试看广告）
+//   2) i.video.qq.com / iwan.video.qq.com 广告类 TRPC 请求拦截
+//      （个人中心广告 / 激励广告 / 浮窗活动 / VIP推广 / 游戏预加载）
+//   3) i.video.qq.com 响应 protobuf 手术：
+//      · 顶部频道导航 + 底部 Tabs：去除 短剧 / 好物 / 好片
+//      · 「我的」页：去除运营推广项与 VIP 营销卡（黑名单见下）
+// ============================================================
+(function () {
+  'use strict';
+
+  // ---------------- 目标清单 ----------------
+  var NAV_TABS = ['短剧', '好物', '好片']; // 顶部频道 + 底部 tab
+  var MY_ITEMS = [ // 「我的」页：运营推广项 + VIP 营销卡标题
+    '特惠升级SVIP', '新人16元看比赛', 'JUMP卡上新', '年轻人专属会员', '优惠宽带送VIP',
+    '游戏福利', 'GOODS商城', '免费看漫剧', '免费领会员', '摸鱼免费玩',
+    '我的游戏', '爱玩游戏', '免流量领会员', '领权益送会员'
+  ];
+  var AD_METHODS = [ // 请求体中出现的广告类 TRPC 方法名片段
+    'GetPersonalCenterAdData',   // 个人中心广告数据
+    'reward_ad_ssp',             // 激励广告（入口/挂件/关注礼）
+    'GetFloatActivity',          // 浮窗活动
+    'AccessPromotion',           // VIP 广告推广
+    'GetPromotionGlobalConfig',  // 推广全局配置
+    'GetSDKInitData',            // 移动(CMCC)推广 SDK
+    'GetPreloadGames'            // 游戏预加载（我的游戏/爱玩游戏）
+  ];
+  var FEAT_NAV = 'EditChannelListActivity';  // 顶部频道导航响应特征
+  var FEAT_BOTTOM = 'GetTabListRsp';         // 底部 tab 响应特征
+  var FEAT_MY1 = 'user_center_top_function'; // 我的页特征
+  var FEAT_MY2 = 'user_center_more_function';
+
+  // ---------------- 工具函数 ----------------
+  function toU8(b) {
+    if (b instanceof Uint8Array) return b;
+    if (typeof b === 'string') {
+      var arr = new Uint8Array(b.length);
+      for (var i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i) & 0xff;
+      return arr;
+    }
+    return null;
+  }
+  function toStr(b) {
+    if (typeof b === 'string') return b;
+    if (b instanceof Uint8Array) {
+      var s = '';
+      for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+      return s;
+    }
+    return '';
+  }
+  function utf8Of(bytes, start, end) {
+    var out = '', i = start;
+    while (i < end) {
+      var b0 = bytes[i];
+      if (b0 < 0x80) { out += String.fromCharCode(b0); i++; }
+      else if ((b0 & 0xE0) === 0xC0) {
+        if (i + 1 >= end || (bytes[i + 1] & 0xC0) !== 0x80) return null;
+        out += String.fromCharCode(((b0 & 0x1F) << 6) | (bytes[i + 1] & 0x3F)); i += 2;
+      } else if ((b0 & 0xF0) === 0xE0) {
+        if (i + 2 >= end || (bytes[i + 1] & 0xC0) !== 0x80 || (bytes[i + 2] & 0xC0) !== 0x80) return null;
+        out += String.fromCharCode(((b0 & 0x0F) << 12) | ((bytes[i + 1] & 0x3F) << 6) | (bytes[i + 2] & 0x3F)); i += 3;
+      } else if ((b0 & 0xF8) === 0xF0) {
+        if (i + 3 >= end) return null;
+        var cp = ((b0 & 0x07) << 18) | ((bytes[i + 1] & 0x3F) << 12) | ((bytes[i + 2] & 0x3F) << 6) | (bytes[i + 3] & 0x3F);
+        cp -= 0x10000;
+        if (cp < 0) return null;
+        out += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF)); i += 4;
+      } else return null;
+    }
+    return out;
+  }
+  function readVarint(bytes, pos) {
+    var result = 0, shift = 0;
+    while (true) {
+      if (pos >= bytes.length) return null;
+      var b = bytes[pos++];
+      result += (b & 0x7F) * Math.pow(2, shift);
+      if (!(b & 0x80)) break;
+      shift += 7;
+      if (shift > 35) return null;
+    }
+    return { value: result, pos: pos };
+  }
+  function varintBytes(v) {
+    var out = [];
+    do {
+      var b = v % 128;
+      v = Math.floor(v / 128);
+      if (v > 0) b |= 0x80;
+      out.push(b);
+    } while (v > 0);
+    return new Uint8Array(out);
+  }
+
+  // ---------------- protobuf 解析 ----------------
+  function parseMessage(bytes, start, end) {
+    var fields = [], pos = start;
+    while (pos < end) {
+      var s = pos;
+      var tr = readVarint(bytes, pos);
+      if (!tr) return null;
+      pos = tr.pos;
+      var tag = tr.value, fno = Math.floor(tag / 8), wire = tag % 8;
+      if (fno === 0) return null;
+      var fl = { f: fno, w: wire, start: s, end: s, vStart: pos, vEnd: pos, len: 0, msg: null };
+      if (wire === 0) {
+        var vr = readVarint(bytes, pos);
+        if (!vr) return null;
+        pos = vr.pos; fl.end = pos;
+      } else if (wire === 1) {
+        if (pos + 8 > end) return null;
+        pos += 8; fl.end = pos;
+      } else if (wire === 2) {
+        var lr = readVarint(bytes, pos);
+        if (!lr) return null;
+        var len = lr.value; pos = lr.pos;
+        if (pos + len > end) return null;
+        fl.len = len; fl.vStart = pos; fl.vEnd = pos + len;
+        pos += len; fl.end = pos;
+      } else if (wire === 5) {
+        if (pos + 4 > end) return null;
+        pos += 4; fl.end = pos;
+      } else return null;
+      fields.push(fl);
+    }
+    if (pos !== end) return null;
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.w === 2 && f.len >= 2) {
+        var sub = parseMessage(bytes, f.vStart, f.vEnd);
+        if (sub !== null) f.msg = sub;
+      }
+    }
+    return fields;
+  }
+
+  function collectMatches(bytes, msg, chain, targets, matches) {
+    if (!msg) return;
+    for (var i = 0; i < msg.length; i++) {
+      var fl = msg[i];
+      if (fl.w !== 2) continue;
+      if (fl.len >= 1 && fl.len <= 64) {
+        var s = utf8Of(bytes, fl.vStart, fl.vEnd);
+        if (s !== null && targets.indexOf(s) >= 0) {
+          matches.push({ chain: chain, field: fl });
+        }
+      }
+      // 实时解析子消息继续深入（不依赖预构建，防断链）
+      var sub = parseMessage(bytes, fl.vStart, fl.vEnd);
+      if (sub !== null) {
+        fl.msg = sub;
+        var nc = chain.concat([fl]);
+        collectMatches(bytes, sub, nc, targets, matches);
+      }
+    }
+  }
+
+  // 卡片级判定：
+  //  · 含直接的 http/https/txvideo URL 字符串字段，或
+  //  · 字段数 >= 6 且含 varint 字段（导航项/底部 tab 等结构特征）
+  //  URL 检测支持子消息内嵌一层（部分 URL 被包在子消息中）
+  function isCard(bytes, msg) {
+    if (!msg || msg.length < 3) return false;
+    var hasVarint = false, hasUrl = false;
+    for (var i = 0; i < msg.length; i++) {
+      var fl = msg[i];
+      if (fl.w === 0 || fl.w === 1 || fl.w === 5) hasVarint = true;
+      if (fl.w !== 2) continue;
+      if (fl.len >= 8) {
+        var s = utf8Of(bytes, fl.vStart, fl.vEnd);
+        if (s !== null && (s.indexOf('http://') === 0 || s.indexOf('https://') === 0 || s.indexOf('txvideo://') === 0)) hasUrl = true;
+        if (!hasUrl && fl.msg) {
+          // 子消息内嵌 URL（一层）
+          for (var j = 0; j < fl.msg.length; j++) {
+            var c = fl.msg[j];
+            if (c.w === 2 && c.len >= 8) {
+              var cs = utf8Of(bytes, c.vStart, c.vEnd);
+              if (cs !== null && (cs.indexOf('http://') === 0 || cs.indexOf('https://') === 0 || cs.indexOf('txvideo://') === 0)) { hasUrl = true; break; }
+            }
+          }
+        }
+      }
+    }
+    if (hasUrl) return true;
+    if (msg.length >= 6 && hasVarint) return true;
+    return false;
+  }
+
+  function cardFieldFor(bytes, match) {
+    var chain = match.chain;
+    for (var i = chain.length - 1; i >= 0; i--) {
+      var f = chain[i];
+      if (f.msg && isCard(bytes, f.msg)) return f;
+    }
+    return null;
+  }
+
+  // ---------------- 重建 ----------------
+  function subtreeHasRemoval(msg, removed) {
+    for (var i = 0; i < msg.length; i++) {
+      if (removed[msg[i].start]) return true;
+      if (msg[i].msg && subtreeHasRemoval(msg[i].msg, removed)) return true;
+    }
+    return false;
+  }
+  function rebuildField(bytes, fl, removed) {
+    if (fl.w !== 2) {
+      return bytes.subarray(fl.start, fl.end);
+    }
+    if (fl.msg && subtreeHasRemoval(fl.msg, removed)) {
+      var inner = rebuildMessage(bytes, fl.msg, removed);
+      var tagBytes = varintBytes(fl.f * 8 + 2);
+      var lenBytes = varintBytes(inner.length);
+      return concatBytes(tagBytes, lenBytes, inner);
+    }
+    return bytes.subarray(fl.start, fl.end);
+  }
+  function rebuildMessage(bytes, msg, removed) {
+    var parts = [];
+    for (var i = 0; i < msg.length; i++) {
+      var fl = msg[i];
+      if (removed[fl.start]) continue;
+      parts.push(rebuildField(bytes, fl, removed));
+    }
+    return concatBytes.apply(null, parts);
+  }
+  function concatBytes() {
+    var total = 0, i;
+    for (i = 0; i < arguments.length; i++) total += arguments[i].length;
+    var out = new Uint8Array(total), pos = 0;
+    for (i = 0; i < arguments.length; i++) {
+      out.set(arguments[i], pos);
+      pos += arguments[i].length;
+    }
+    return out;
+  }
+
+  // ---------------- 响应手术 ----------------
+  function processResponse(body) {
+    // 帧头校验：09 30 00 00 00 + 3字节大端总长 + 8字节，protobuf 自偏移16开始
+    if (body.length < 32) return null;
+    if (body[0] !== 0x09 || body[1] !== 0x30) return null;
+    var total = (body[5] << 16) | (body[6] << 8) | body[7];
+    if (total !== body.length) return null;
+
+    var text = toStr(body);
+    var targets = null;
+    if (text.indexOf(FEAT_MY1) >= 0 || text.indexOf(FEAT_MY2) >= 0) {
+      targets = MY_ITEMS;
+    } else if (text.indexOf(FEAT_NAV) >= 0 || text.indexOf(FEAT_BOTTOM) >= 0) {
+      targets = NAV_TABS;
+    }
+    if (!targets) return null;
+
+    var msg = parseMessage(body, 16, body.length);
+    if (!msg) return null;
+
+    var matches = [];
+    collectMatches(body, msg, [], targets, matches);
+    if (!matches.length) return null;
+
+    var removed = {}, i, c;
+    for (i = 0; i < matches.length; i++) {
+      c = cardFieldFor(body, matches[i]);
+      if (c) removed[c.start] = true;
+    }
+    var keys = Object.keys(removed);
+    if (!keys.length) return null;
+
+    var newMsg = rebuildMessage(body, msg, removed);
+    var newBody = concatBytes(body.subarray(0, 16), newMsg);
+    var nt = newBody.length;
+    newBody[5] = (nt >> 16) & 0xFF;
+    newBody[6] = (nt >> 8) & 0xFF;
+    newBody[7] = nt & 0xFF;
+    return newBody;
+  }
+
+  // ---------------- 入口 ----------------
+  if (typeof $response !== 'undefined' && $response) {
+    var reqUrl = ($request && $request.url) || '';
+    if (reqUrl.indexOf('i.video.qq.com') >= 0) {
+      var rb = toU8($response.body);
+      if (rb && rb.length > 32) {
+        var out = processResponse(rb);
+        if (out && out.length !== rb.length) {
+          $done({ body: out });
+          return;
+        }
+      }
+    }
+    $done({});
+    return;
+  }
+
+  if (typeof $request !== 'undefined' && $request) {
+    var url = $request.url || '';
+    var rawBody = $request.body || '';
+    var wasU8 = rawBody instanceof Uint8Array;
+    var reqStr = toStr(rawBody);
+
+    // 1) 播放接口参数改写（去贴片/试看广告）
+    if ((url.indexOf('vv.video.qq.com') >= 0 || url.indexOf('vv6.video.qq.com') >= 0) &&
+        (url.indexOf('getvinfo') >= 0 || url.indexOf('batchvinfo') >= 0)) {
+      var nb = reqStr
+        .replace(/sppreviewtype=\d+/g, 'sppreviewtype=0')
+        .replace(/spsrt=\d+/g, 'spsrt=0');
+      if (nb !== reqStr) {
+        if (wasU8) {
+          var arr = new Uint8Array(nb.length);
+          for (var z = 0; z < nb.length; z++) arr[z] = nb.charCodeAt(z) & 0xff;
+          $done({ body: arr });
+        } else {
+          $done({ body: nb });
+        }
+        return;
+      }
+      $done({});
+      return;
+    }
+
+    // 2) 广告类 TRPC 请求拦截
+    if (url.indexOf('i.video.qq.com') >= 0 || url.indexOf('iwan.video.qq.com') >= 0) {
+      for (var k = 0; k < AD_METHODS.length; k++) {
+        if (reqStr.indexOf(AD_METHODS[k]) >= 0) {
+          $done({ response: { status: 204, headers: {}, body: '' } });
+          return;
+        }
+      }
+    }
+    $done({});
+    return;
+  }
+
+  $done({});
+})();
 
 // (function (global) {
 //   'use strict';
