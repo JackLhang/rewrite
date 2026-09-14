@@ -1,54 +1,47 @@
-#!name=腾讯视频去广告+精简 (QQLiveClean)
-#!desc=基于 iOS 腾讯视频 v9.04.45 (live4iphoneRel) 抓包分析：去除首页/个人中心信息流广告、悬浮广告、VIP 促销卡、运营推广接口；精简「我的」页面（移除广告位与推广项）与底部 Tab 栏（去掉短剧/好物）。MVL 页面数据为 protobuf，由 QQLiveClean.js 无损改写响应；请勿改脚本与插件路径。
-#!author=Agentic Builder
-#!homepage=
+#!name=腾讯视频去广告
+#!desc=过滤腾讯视频客户端广告并精简界面（适配 iOS 9.04.46.25021）：移除播放贴片/试看广告、激励广告、个人中心广告、浮窗活动与 VIP 推广；精简顶部频道与底部 Tab（去除短剧/好物/好片）；清理「我的」页运营推广项与 VIP 营销卡。需开启 MitM 与脚本功能。
+#!author=RuCu6 + 9.x 适配
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Tencent_Video.png
+#!category=BetaPlugin
 #!openUrl=https://apps.apple.com/app/id458318329
 #!tag=去广告
 #!system=ios
-#!version=1.0.0
-#!date=2026-09-10 13:25:38
+#!loon_version=3.2.4(787)
+#!date=2026-09-14 17:25:38
 
+[Rule]
+# 原模块广告域名拦截（保留）
+DOMAIN,adsmind.gdtimg.com,REJECT
+DOMAIN,info4.video.qq.com,REJECT
+DOMAIN,info6.video.qq.com,REJECT
+DOMAIN,ios.video.mpush.qq.com,REJECT
+DOMAIN,otheve.beacon.qq.com,REJECT
+DOMAIN,pgdt.gtimg.cn,REJECT
+DOMAIN,tpns.qq.com,REJECT
+DOMAIN-SUFFIX,gdt.qq.com,REJECT
+DOMAIN-SUFFIX,l.qq.com,REJECT
+DOMAIN-KEYWORD,trace.qq.com,REJECT
+DOMAIN-KEYWORD,trace.video.qq.com,REJECT
+IP-CIDR,47.110.187.87/32,REJECT,no-resolve
+# 注意：新版播放信息(getvinfo/batchvinfo/checktime)已迁移到 vv6.video.qq.com，
+# 因此不再整域名 REJECT vv6.video.qq.com，改由脚本改写请求参数去广告
+# 新增：广告 SDK / 归因上报
+DOMAIN,iacc.qq.com,REJECT
+DOMAIN,iacc.rec.qq.com,REJECT
+DOMAIN,mazu.m.qq.com,REJECT
+DOMAIN,tmfmazu.m.qq.com,REJECT
+# 旧版广告视频 CDN（兼容保留）
+URL-REGEX,^http://[\d\.:]*/?(defaultts\.tc|vmind\.qqvideo\.tc|finderpdd\.video)\.qq\.com/\w+,REJECT
+URL-REGEX,^http://apd-vlive\.apdcdn\.tc\.qq\.com/vmind\.qqvideo\.tc\.qq\.com/\w+,REJECT
+URL-REGEX,^http://apd-\w+\.v\.smtcdns\.com/(defaultts|omts|vmind\.qqvideo)\.tc\.qq\.com/\w+,REJECT
 
-#复写
-[Rewrite]
-# ---- 腾讯广告 SDK / 广告素材 / 广告统计 ----
-request if ${url} ~= /^https?:\/\/iacc\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/iacc\.rec\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/rdelivery\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/cloud\.tgpa\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/hc\.tdm\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/receiver\.tdm\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/disp-qryapi\.3g\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/playproxy\.video\.qq\.com\/monet.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/vip\.video\.qq\.com\/rpc\/trpc\.vip_ad_promotion\..*/i then reject(200)
-request if ${url} ~= /^https?:\/\/pgdt\.gtimg\.cn\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/pgdt\.gtimg\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/gdtimg\.cn\/.*/i then reject(200)
+[Map Local]
+^https?:\/\/vv\.video\.qq\.com\/(diff|get)vmind data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
-# ---- 埋点 / 遥测上报 ----
-request if ${url} ~= /^https?:\/\/galileotelemetry\.tencent\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/beacon\.cdn\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/aegis\.cdn-go\.cn\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/rumt-zh\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/trace\.inlong\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/szmg\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/snowflake\.qq\.com\/.*/i then reject(200)
-
-#脚本
 [Script]
-request if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_adapi", timeout=10, requires_body=true
-response if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="QQLive_clean", timeout=15, requires_body=true
+request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(getvinfo|batchvinfo)/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires_body=true, binary_body_mode=true
+request if ${url} ~= /^https?:\/\/(i\.video\.qq\.com|iwan\.video\.qq\.com)\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=20, requires_body=true, binary_body_mode=true
 
 [MITM]
-hostname = i.video.qq.com, iacc.qq.com, iacc.rec.qq.com, rdelivery.qq.com, cloud.tgpa.qq.com, hc.tdm.qq.com, receiver.tdm.qq.com, disp-qryapi.3g.qq.com, playproxy.video.qq.com, vip.video.qq.com, pgdt.gtimg.cn, pgdt.gtimg.com, gdtimg.cn, galileotelemetry.tencent.com, beacon.cdn.qq.com, aegis.cdn-go.cn, rumt-zh.com, trace.inlong.qq.com, szmg.qq.com, snowflake.qq.com
-
-# ============ 附注 ============
-# 1. i.video.qq.com 为业务 tRPC 网关（App 全部业务走它），不能用 URL 规则整域拦截；
-# 网关内的广告方法（GetFloatActivity / GetFollowHeartRewardAdInfo / GetSDKInitData /
-# AccessPromotion 等）由 QQLiveClean.js 的 http-request 分支按请求体方法名直接返回空帧；
-# 页面内广告（ad_block_* 卡 / AdFeedInfo / AdResponseInfo / 个人中心 ad_middle 等）由
-# http-response 分支无损改写 protobuf 响应。
-# 2. 个人中心「更多/顶部」里被移除的运营推广项、VIP 促销卡、Tab 栏移除名单均可在
-# QQLiveClean.js 顶部 CFG 中调整（如想保留「会员专区」Tab 请勿改，默认保留）。
-# 3. 若 App 更新后界面回归，通常为新版运营文案/模块名变化，调整 CFG 名单即可，无需改算法。
+hostname = vv.video.qq.com, vv6.video.qq.com, i.video.qq.com, iwan.video.qq.com
