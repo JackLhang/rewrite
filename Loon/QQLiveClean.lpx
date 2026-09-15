@@ -8,7 +8,7 @@
 #!system=ios
 #!loon_version=3.2.4(787)
 #!homepage=https://hub.kelee.one
-#!date=2026-09-15 11:37:40
+#!date=2026-09-15 15:37:40
 
 [Rule]
 # 阻断 QUIC(HTTP/3)：否则腾讯视频走 QUIC 会绕过 MitM，脚本与 URL 规则全部失效。
