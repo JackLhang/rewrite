@@ -8,7 +8,8 @@
 #!system=ios
 #!loon_version=3.5.1(992)
 #!homepage=https://hub.kelee.one
-#!date=2026-09-15 16:25:20
+#!date=2026-09-15 17:57:03
+
 [Rule]
 # 阻断 QUIC(HTTP/3)：否则腾讯视频走 QUIC 会绕过 MitM，脚本与 URL 规则全部失效。
 # 全局生效（影响所有 App 的 QUIC），如不想要可删除本行，代价是部分广告可能漏拦。
@@ -30,9 +31,10 @@ DOMAIN-KEYWORD,trace.video.qq.com,REJECT
 IP-CIDR,47.110.187.87/32,REJECT,no-resolve
 # 注意：新版播放信息(getvinfo/batchvinfo/checktime)已迁移到 vv6.video.qq.com，
 # 因此不再整域名 REJECT vv6.video.qq.com，改由脚本改写请求参数去广告
-# 新增：广告 SDK / 归因上报
+# 新增：广告 SDK / 归因上报（含 iacc.stgw 子域，日志实测出现）
 DOMAIN,iacc.qq.com,REJECT
 DOMAIN,iacc.rec.qq.com,REJECT
+DOMAIN,iacc.stgw.qq.com,REJECT
 DOMAIN,mazu.m.qq.com,REJECT
 DOMAIN,tmfmazu.m.qq.com,REJECT
 # 旧版广告视频 CDN（兼容保留）
@@ -41,12 +43,11 @@ URL-REGEX,^http://apd-vlive\.apdcdn\.tc\.qq\.com/vmind\.qqvideo\.tc\.qq\.com/\w+
 URL-REGEX,^http://apd-\w+\.v\.smtcdns\.com/(defaultts|omts|vmind\.qqvideo)\.tc\.qq\.com/\w+,REJECT
 
 [Script]
-# 脚本托管于 https://paste.rs/fJ4JW（内容与仓库内 qqvideo-clean.js 一致），可自行替换为你的托管地址
-# vmind 旧链路兼容：直接返回空 JSON（Loon 无 Map Local 功能，由本脚本实现）
-request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(diff|get)vmind/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires_body=true, binary_body_mode=true
-request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(getvinfo|batchvinfo)/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires_body=true, binary_body_mode=true
-request if ${url} ~= /^https?:\/\/(i\.video\.qq\.com|iwan\.video\.qq\.com)\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires_body=true, binary_body_mode=true
-response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=20, requires_body=true, binary_body_mode=true
+# 脚本托管于 https://paste.rs/He2T9（内容与仓库内 qqvideo-clean.js 一致；已内置 gzip 自适应与「首次生效通知」）
+http-request ^https?:\/\/vv6?\.video\.qq\.com\/(diff|get)vmind script-path=https://paste.rs/He2T9, requires-body=1, binary-body-mode=true, timeout=15
+http-request ^https?:\/\/vv6?\.video\.qq\.com\/(getvinfo|batchvinfo) script-path=https://paste.rs/He2T9, requires-body=1, binary-body-mode=true, timeout=15
+http-request ^https?:\/\/(i\.video\.qq\.com|iwan\.video\.qq\.com)\/ script-path=https://paste.rs/He2T9, requires-body=1, binary-body-mode=true, timeout=15
+http-response ^https?:\/\/i\.video\.qq\.com\/ script-path=https://paste.rs/He2T9, requires-body=1, binary-body-mode=true, timeout=20
 
 [MITM]
 hostname = vv.video.qq.com, vv6.video.qq.com, i.video.qq.com, iwan.video.qq.com
