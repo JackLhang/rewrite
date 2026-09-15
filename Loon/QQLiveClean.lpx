@@ -8,7 +8,7 @@
 #!system=ios
 #!loon_version=3.2.4(787)
 #!homepage=https://hub.kelee.one
-#!date=2026-09-15 15:48:40
+#!date=2026-09-15
 
 [Rule]
 # 阻断 QUIC(HTTP/3)：否则腾讯视频走 QUIC 会绕过 MitM，脚本与 URL 规则全部失效。
@@ -46,10 +46,9 @@ URL-REGEX,^http://apd-\w+\.v\.smtcdns\.com/(defaultts|omts|vmind\.qqvideo)\.tc\.
 
 [Script]
 # 脚本托管于 https://paste.rs/RNiXA（内容与仓库内 qqvideo-clean.js 一致），可自行替换为你的托管地址
-request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(getvinfo|batchvinfo)/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires-body=1, binary-body-mode=true
-request if ${url} ~= /^https?:\/\/(i\.video\.qq\.com|iwan\.video\.qq\.com)\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires-body=1, binary-body-mode=true
-response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=20, requires-body=1, binary-body-mode=true
+request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(getvinfo|batchvinfo)/i then script("https://paste.rs/RNiXA") with timeout=15, requires_body=true, binary_body_mode=true
+request if ${url} ~= /^https?:\/\/(i\.video\.qq\.com|iwan\.video\.qq\.com)\//i then script("https://paste.rs/RNiXA") with timeout=15, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\//i then script("https://paste.rs/RNiXA") with timeout=20, requires_body=true, binary_body_mode=true
 
 [MITM]
 hostname = vv.video.qq.com, vv6.video.qq.com, i.video.qq.com, iwan.video.qq.com
-
