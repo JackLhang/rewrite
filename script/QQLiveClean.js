@@ -32,7 +32,6 @@
 //   说明：开屏广告由模块 [Rule] 拦截，不在此脚本处理
 // ============================================================
 
-
 // ============================================================
 // 腾讯视频去广告 / 界面精简  (适配 iOS 9.04.46.25021)
 // 适用：Surge / Loon / Stash（响应脚本需开启 binary-body-mode）
@@ -350,6 +349,185 @@
     return out;
   }
 
+
+  // ---------------- gzip 自适应（纯 JS，ES5 无依赖） ----------------
+  var CRC_TABLE = null;
+  function crc32(u8) {
+  if (!CRC_TABLE) {
+  CRC_TABLE = new Int32Array(256);
+  for (var n = 0; n < 256; n++) {
+  var c = n;
+  for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+  CRC_TABLE[n] = c;
+  }
+  }
+  var crc = -1, i;
+  for (i = 0; i < u8.length; i++) crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ u8[i]) & 0xff];
+  return (crc ^ -1) >>> 0;
+  }
+  function gzipStored(u8) {
+  var parts = [], blocks = Math.max(1, Math.ceil(u8.length / 65535)), i, pos = 0, len, j, crc, isize;
+  // gzip 头：magic(2) CM=8(1) FLG=0(1) MTIME(4) XFL=0(1) OS=255(1)
+  parts.push(new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff]));
+  for (i = 0; i < blocks; i++) {
+  len = Math.min(65535, u8.length - pos);
+  var last = (i === blocks - 1) ? 1 : 0;
+  var head = new Uint8Array(5);
+  head[0] = last;                    // BFINAL + BTYPE=00(stored)
+  head[1] = len & 0xff;              // LEN 小端
+  head[2] = (len >> 8) & 0xff;
+  head[3] = (~len) & 0xff;           // NLEN = ~LEN 小端
+  head[4] = ((~len) >> 8) & 0xff;
+  parts.push(head);
+  parts.push(u8.subarray(pos, pos + len));
+  pos += len;
+  }
+  crc = crc32(u8);
+  isize = u8.length >>> 0;
+  var tail = new Uint8Array(8);
+  tail[0] = crc & 0xff; tail[1] = (crc >> 8) & 0xff; tail[2] = (crc >> 16) & 0xff; tail[3] = (crc >>> 24) & 0xff;
+  tail[4] = isize & 0xff; tail[5] = (isize >> 8) & 0xff; tail[6] = (isize >> 16) & 0xff; tail[7] = (isize >>> 24) & 0xff;
+  parts.push(tail);
+  var total = 0;
+  for (i = 0; i < parts.length; i++) total += parts[i].length;
+  var out = new Uint8Array(total), p = 0;
+  for (i = 0; i < parts.length; i++) { out.set(parts[i], p); p += parts[i].length; }
+  return out;
+  }
+
+  /* 纯 JS gzip inflate（RFC1950/1951），ES5 无依赖。返回 Uint8Array 或 null */
+  function inflateGzip(src) {
+  if (!src || src.length < 18 || src[0] !== 0x1f || src[1] !== 0x8b || src[2] !== 8) return null;
+  var p = 10, flg = src[3], xlen, i;
+  if (flg & 4) { xlen = src[p] | (src[p + 1] << 8); p += 2 + xlen; }
+  if (flg & 8) { while (src[p] !== 0) p++; p++; }
+  if (flg & 16) { while (src[p] !== 0) p++; p++; }
+  if (flg & 2) p += 2;
+  if (p >= src.length) return null;
+
+  var inPos = p;
+  var out = [];
+
+  var bitPos = 0;
+  function getBits(n) {
+  var v = 0, i;
+  for (i = 0; i < n; i++) {
+  v |= ((src[inPos] >> bitPos) & 1) << i;
+  if (++bitPos === 8) { bitPos = 0; inPos++; }
+  }
+  return v;
+  }
+
+  function buildTable(lens, n) {
+  var maxLen = 0, i;
+  for (i = 0; i < n; i++) if (lens[i] > maxLen) maxLen = lens[i];
+  if (maxLen === 0) return null;
+  var count = new Array(maxLen + 1), code = new Array(maxLen + 1), j;
+  for (i = 0; i <= maxLen; i++) count[i] = 0;
+  for (i = 0; i < n; i++) count[lens[i]]++;
+  count[0] = 0;
+  code[0] = 0;
+  for (i = 1; i <= maxLen; i++) code[i] = (code[i - 1] + count[i - 1]) << 1;
+  var t = new Int16Array(1 << maxLen);
+  for (i = 0; i < t.length; i++) t[i] = -1;
+  for (i = 0; i < n; i++) {
+  var len = lens[i];
+  if (len === 0) continue;
+  var c = code[len]++;
+  var start = c << (maxLen - len), span = 1 << (maxLen - len);
+  for (j = start; j < start + span; j++) t[j] = i;
+  }
+  t.maxBits = maxLen;
+  t.lens = lens;
+  return t;
+  }
+
+  function readSym(t) {
+  var idx = 0, i, k;
+  for (i = 0; i < t.maxBits; i++) idx = (idx << 1) | getBits(1);
+  var s = t[idx];
+  if (s < 0) return -1;
+  k = t.maxBits - t.lens[s];
+  while (k-- > 0) { bitPos--; if (bitPos < 0) { bitPos = 7; inPos--; } }
+  return s;
+  }
+
+  /* fixed huffman 表：lit/dist 码长（RFC1951 3.2.6） */
+  var FIXED_LIT_LENS = new Array(288), FIXED_DIST_LENS = new Array(30), z;
+  for (z = 0; z < 144; z++) FIXED_LIT_LENS[z] = 8;
+  for (; z < 256; z++) FIXED_LIT_LENS[z] = 9;
+  for (; z < 280; z++) FIXED_LIT_LENS[z] = 7;
+  for (; z < 288; z++) FIXED_LIT_LENS[z] = 8;
+  for (z = 0; z < 30; z++) FIXED_DIST_LENS[z] = 5;
+  var FIXED_LIT = buildTable(FIXED_LIT_LENS, 288);
+  var FIXED_DIST = buildTable(FIXED_DIST_LENS, 30);
+  var ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+  var LEN_BASE = [3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258];
+  var LEN_EXT  = [0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0];
+  var DIST_BASE = [1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];
+  var DIST_EXT  = [0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
+
+  var finished = false, guard = 0, MAX_OUT = 2000000;
+  while (!finished) {
+  if (guard++ > 500000) return null;
+  var bfinal = getBits(1), btype = getBits(2);
+  if (btype === 0) {
+  if (bitPos !== 0) { inPos++; bitPos = 0; } /* 字节对齐：丢弃当前字节剩余位 */
+  if (inPos + 4 > src.length) return null;
+  var llen = src[inPos] | (src[inPos + 1] << 8);
+  var nlen = src[inPos + 2] | (src[inPos + 3] << 8);
+  inPos += 4;
+  if ((llen ^ 0xffff) !== nlen) return null;
+  if (inPos + llen > src.length || out.length + llen > MAX_OUT) return null;
+  for (var si = 0; si < llen; si++) out.push(src[inPos + si]);
+  inPos += llen;
+  } else {
+  var litT, distT;
+  if (btype === 1) { litT = FIXED_LIT; distT = FIXED_DIST; }
+  else if (btype === 2) {
+  var hlit = getBits(5) + 257, hdist = getBits(5) + 1, hclen = getBits(4) + 4;
+  if (hlit > 286 || hdist > 30) return null;
+  var clLens = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+  for (var ci = 0; ci < hclen; ci++) clLens[ORDER[ci]] = getBits(3);
+  var clT = buildTable(clLens, 19);
+  if (!clT) return null;
+  var allLens = [], lc = 0, total = hlit + hdist;
+  while (lc < total) {
+  var s = readSym(clT);
+  if (s < 0) return null;
+  if (s < 16) { allLens[lc++] = s; }
+  else if (s === 16) { var rep = getBits(2) + 3, prev = lc > 0 ? allLens[lc - 1] : 0; while (rep--) allLens[lc++] = prev; }
+  else if (s === 17) { var rep2 = getBits(3) + 3; while (rep2--) allLens[lc++] = 0; }
+  else { var rep3 = getBits(7) + 11; while (rep3--) allLens[lc++] = 0; }
+  if (lc > total) return null;
+  }
+  var litLens = allLens.slice(0, hlit), distLens = allLens.slice(hlit, hlit + hdist);
+  litT = buildTable(litLens, hlit);
+  distT = buildTable(distLens, hdist);
+  if (!litT || !distT) return null;
+  } else return null;
+  for (;;) {
+  if (out.length > MAX_OUT) return null;
+  var sym = readSym(litT);
+  if (sym < 0) return null;
+  if (sym === 256) break;
+  if (sym < 256) out.push(sym);
+  else {
+  var li = sym - 257;
+  var l = LEN_BASE[li] + getBits(LEN_EXT[li]);
+  var ds = readSym(distT);
+  if (ds < 0 || ds > 29) return null;
+  var d = DIST_BASE[ds] + getBits(DIST_EXT[ds]);
+  if (d > out.length) return null;
+  for (var m = 0; m < l; m++) out.push(out[out.length - d]);
+  }
+  }
+  }
+  finished = bfinal === 1;
+  }
+  return new Uint8Array(out);
+  }
+
   // ---------------- 响应手术 ----------------
   function processResponse(body) {
     // 帧头校验：09 30 00 00 00 + 3字节大端总长 + 8字节，protobuf 自偏移16开始
@@ -414,6 +592,37 @@
     return newBody;
   }
 
+
+  // ---------------- 响应入口（gzip 自适应：解压→处理→按响应头重新打包） ----------------
+  function headerGet(headers, name) {
+    if (!headers) return '';
+    var lower = name.toLowerCase();
+    for (var k in headers) {
+      if (k.toLowerCase() === lower) return String(headers[k] == null ? '' : headers[k]);
+    }
+    return '';
+  }
+  function handleResponse(reqUrl, response) {
+    var rb = toU8(response.body);
+    if (!rb || rb.length <= 2) return null;
+    var ce = headerGet(response.headers, 'content-encoding').toLowerCase();
+    var wantsGzip = ce.indexOf('gzip') >= 0;
+    var bodyIsGzip = rb[0] === 0x1F && rb[1] === 0x8B;
+    var raw = rb;
+    if (bodyIsGzip) {
+      var inf = inflateGzip(rb);
+      if (!inf) { log('gzip 解压失败，跳过 len=' + rb.length); return null; }
+      raw = inf;
+    }
+    if (raw.length <= 32) return null;
+    var out = processResponse(raw);
+    if (!out || out.length === raw.length) return null;
+    var sent = out;
+    if (wantsGzip || bodyIsGzip) sent = gzipStored(out);
+    log('精简 ' + reqUrl + '：' + raw.length + ' -> ' + out.length + ' 字节' + ((wantsGzip || bodyIsGzip) ? '（gzip 打包返回）' : ''));
+    return sent;
+  }
+
   // ---------------- 入口 ----------------
   var finished = false;
   function finish(obj) {
@@ -426,14 +635,10 @@
     if (typeof $response !== 'undefined' && $response) {
       var reqUrl = ($request && $request.url) || '';
       if (reqUrl.indexOf('i.video.qq.com') >= 0) {
-        var rb = toU8($response.body);
-        if (rb && rb.length > 32) {
-          var out = processResponse(rb);
-          if (out && out.length !== rb.length) {
-            log('精简 ' + reqUrl + '：' + rb.length + ' -> ' + out.length + ' 字节');
-            finish({ body: out });
-            return;
-          }
+        var respBody = handleResponse(reqUrl, $response);
+        if (respBody) {
+          finish({ body: respBody });
+          return;
         }
       }
       finish({});
