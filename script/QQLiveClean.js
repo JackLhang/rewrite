@@ -447,6 +447,14 @@
       if (typeof rawBody === 'string') reqStr = rawBody;
       else { var reqU8 = toU8(rawBody); if (reqU8) reqStr = toStr(reqU8); }
 
+      // 0) vmind 兼容：返回空 JSON（Loon 无 [Map Local]，改由脚本实现；旧链路广告视频接口）
+      if ((url.indexOf('vv.video.qq.com') >= 0 || url.indexOf('vv6.video.qq.com') >= 0) &&
+          url.indexOf('vmind') >= 0) {
+        log('vmind 空响应: ' + url);
+        finish({ response: { status: 200, headers: { 'Content-Type': 'application/json' }, body: '{}' } });
+        return;
+      }
+
       // 1) 播放接口参数改写（去贴片/试看广告）——URL 与 body 双通道
       if ((url.indexOf('vv.video.qq.com') >= 0 || url.indexOf('vv6.video.qq.com') >= 0) &&
           (url.indexOf('getvinfo') >= 0 || url.indexOf('batchvinfo') >= 0)) {
@@ -491,7 +499,6 @@
     finish({});
   }
 })();
-
 
 
 

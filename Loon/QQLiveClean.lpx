@@ -6,10 +6,9 @@
 #!openUrl=https://apps.apple.com/app/id458318329
 #!tag=去广告
 #!system=ios
-#!loon_version=3.2.4(787)
+#!loon_version=3.5.1(992)
 #!homepage=https://hub.kelee.one
-#!date=2026-09-15 16:05:20
-
+#!date=2026-09-15 16:25:20
 [Rule]
 # 阻断 QUIC(HTTP/3)：否则腾讯视频走 QUIC 会绕过 MitM，脚本与 URL 规则全部失效。
 # 全局生效（影响所有 App 的 QUIC），如不想要可删除本行，代价是部分广告可能漏拦。
@@ -41,11 +40,10 @@ URL-REGEX,^http://[\d\.:]*/?(defaultts\.tc|vmind\.qqvideo\.tc|finderpdd\.video)\
 URL-REGEX,^http://apd-vlive\.apdcdn\.tc\.qq\.com/vmind\.qqvideo\.tc\.qq\.com/\w+,REJECT
 URL-REGEX,^http://apd-\w+\.v\.smtcdns\.com/(defaultts|omts|vmind\.qqvideo)\.tc\.qq\.com/\w+,REJECT
 
-[Map Local]
-^https?:\/\/vv\.video\.qq\.com\/(diff|get)vmind data-type=text data="{}" status-code=200 header="Content-Type:application/json"
-
 [Script]
-# 脚本托管于 https://paste.rs/nR4v7（内容与仓库内 qqvideo-clean.js 一致），可自行替换为你的托管地址
+# 脚本托管于 https://paste.rs/fJ4JW（内容与仓库内 qqvideo-clean.js 一致），可自行替换为你的托管地址
+# vmind 旧链路兼容：直接返回空 JSON（Loon 无 Map Local 功能，由本脚本实现）
+request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(diff|get)vmind/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires_body=true, binary_body_mode=true
 request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(getvinfo|batchvinfo)/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires_body=true, binary_body_mode=true
 request if ${url} ~= /^https?:\/\/(i\.video\.qq\.com|iwan\.video\.qq\.com)\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires_body=true, binary_body_mode=true
 response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=20, requires_body=true, binary_body_mode=true
