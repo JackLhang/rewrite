@@ -46,9 +46,9 @@ URL-REGEX,^http://apd-\w+\.v\.smtcdns\.com/(defaultts|omts|vmind\.qqvideo)\.tc\.
 
 [Script]
 # 脚本托管于 https://paste.rs/RNiXA（内容与仓库内 qqvideo-clean.js 一致），可自行替换为你的托管地址
-request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(getvinfo|batchvinfo)/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires-body=1, binary-body-mode=true
-request if ${url} ~= /^https?:\/\/(i\.video\.qq\.com|iwan\.video\.qq\.com)\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires-body=1, binary-body-mode=true
-response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=20, requires-body=1, binary-body-mode=true
+request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(getvinfo|batchvinfo)/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires-body=true, binary-body-mode=true
+request if ${url} ~= /^https?:\/\/(i\.video\.qq\.com|iwan\.video\.qq\.com)\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=15, requires-body=true, binary-body-mode=true
+response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with timeout=20, requires-body=true, binary-body-mode=true
 
 [MITM]
 hostname = vv.video.qq.com, vv6.video.qq.com, i.video.qq.com, iwan.video.qq.com
