@@ -41,8 +41,8 @@ URL-REGEX,^http://[\d\.:]*/?(defaultts\.tc|vmind\.qqvideo\.tc|finderpdd\.video)\
 URL-REGEX,^http://apd-vlive\.apdcdn\.tc\.qq\.com/vmind\.qqvideo\.tc\.qq\.com/\w+,REJECT
 URL-REGEX,^http://apd-\w+\.v\.smtcdns\.com/(defaultts|omts|vmind\.qqvideo)\.tc\.qq\.com/\w+,REJECT
 
-[Map Local]
-^https?:\/\/vv\.video\.qq\.com\/(diff|get)vmind data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# [Map Local]
+# ^https?:\/\/vv\.video\.qq\.com\/(diff|get)vmind data-type=text data="{}" status-code=200 header="Content-Type:application/json"
 
 [Script]
 # 脚本托管于 https://paste.rs/RNiXA（内容与仓库内 qqvideo-clean.js 一致），可自行替换为你的托管地址
