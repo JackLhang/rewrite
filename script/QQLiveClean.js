@@ -66,7 +66,8 @@
     'AccessPromotion',           // VIP 广告推广
     'GetPromotionGlobalConfig',  // 推广全局配置
     'GetSDKInitData',            // 移动(CMCC)推广 SDK
-    'GetPreloadGames'            // 游戏预加载（我的游戏/爱玩游戏）
+    'GetPreloadGames',           // 游戏预加载（我的游戏/爱玩游戏）
+    'ServerAdFeedsVideo'         // 9.04.50 新增：广告 feed 视频卡数据
   ];
   // 广告卡特征（统一按字节匹配，兼容二进制混排字段）
   var AD_EXACT = ['广告']; // 精确等值（广告标签）
@@ -719,6 +720,7 @@
     finish({});
   }
 })();
+
 
 
 

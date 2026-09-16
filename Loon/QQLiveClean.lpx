@@ -8,7 +8,7 @@
 #!system=ios
 #!loon_version=3.2.4(787)
 #!homepage=https://hub.kelee.one
-#!date=2026-09-16 14:15:20
+#!date=2026-09-15
 
 [Rule]
 # 阻断 QUIC(HTTP/3)：否则腾讯视频走 QUIC 会绕过 MitM，脚本与 URL 规则全部失效。
@@ -37,19 +37,26 @@ DOMAIN,iacc.rec.qq.com,REJECT
 DOMAIN,iacc.stgw.qq.com,REJECT
 DOMAIN,mazu.m.qq.com,REJECT
 DOMAIN,tmfmazu.m.qq.com,REJECT
+# 9.04.50 新增：广告 SDK 富媒体投放域（tab_gray 动态配置 / 密文广告配置 / 统计上报）
+DOMAIN,rdelivery.qq.com,REJECT
+# 9.04.50 新增：广告视频素材 CDN（截图顶部/Feed 视频广告分片源）
+DOMAIN,omexts.tc.qq.com,REJECT
+# 9.04.50 新增：GOODS 商城页 compose 配置（我的页商城页数据）
+DOMAIN,video-vip-1258344701.shiply-cdn.qq.com,REJECT
+
 # 旧版广告视频 CDN（兼容保留）
 URL-REGEX,^http://[\\d\\.:]*/?(defaultts\\.tc|vmind\\.qqvideo\\.tc|finderpdd\\.video)\\.qq\\.com/\\w+,REJECT
 URL-REGEX,^http://apd-vlive\\.apdcdn\\.tc\\.qq\\.com/vmind\\.qqvideo\\.tc\\.qq\\.com/\\w+,REJECT
 URL-REGEX,^http://apd-\\w+\\.v\\.smtcdns\\.com/(defaultts|omts|vmind\\.qqvideo)\\.tc\\.qq\\.com/\\w+,REJECT
 
 [Script]
-# 脚本托管于 https://paste.rs/0YcFf（内容与仓库内 qqvideo-clean.js 一致；已内置 gzip 自适应与「首次生效通知」）
+# 脚本托管于 https://paste.rs/6vJtd（内容与仓库内 qqvideo-clean.js 一致；已内置 gzip 自适应与「首次生效通知」）
 # 可自行替换为你的托管地址，例如 https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js（须同步最新内容）
 # vmind 旧链路兼容：直接返回空 JSON（Loon 无 Map Local 功能，由本脚本实现）
-request if ${url} ~= /^https?:\\\/\\\/vv6?\\.video\\.qq\\.com\\\/(diff|get)vmind/i then script("https://paste.rs/0YcFf") with timeout=15, requires_body=true, binary_body_mode=true
-request if ${url} ~= /^https?:\\\/\\\/vv6?\\.video\\.qq\\.com\\\/(getvinfo|batchvinfo)/i then script("https://paste.rs/0YcFf") with timeout=15, requires_body=true, binary_body_mode=true
-request if ${url} ~= /^https?:\\\/\\\/(i\\.video\\.qq\\.com|iwan\\.video\\.qq\\.com)\\\//i then script("https://paste.rs/0YcFf") with timeout=15, requires_body=true, binary_body_mode=true
-response if ${url} ~= /^https?:\\\/\\\/i\\.video\\.qq\\.com\\\//i then script("https://paste.rs/0YcFf") with timeout=20, requires_body=true, binary_body_mode=true
+request if ${url} ~= /^https?:\\\/\\\/vv6?\\.video\\.qq\\.com\\\/(diff|get)vmind/i then script("https://paste.rs/6vJtd") with timeout=15, requires_body=true, binary_body_mode=true
+request if ${url} ~= /^https?:\\\/\\\/vv6?\\.video\\.qq\\.com\\\/(getvinfo|batchvinfo)/i then script("https://paste.rs/6vJtd") with timeout=15, requires_body=true, binary_body_mode=true
+request if ${url} ~= /^https?:\\\/\\\/(i\\.video\\.qq\\.com|iwan\\.video\\.qq\\.com)\\\//i then script("https://paste.rs/6vJtd") with timeout=15, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\\\/\\\/i\\.video\\.qq\\.com\\\//i then script("https://paste.rs/6vJtd") with timeout=20, requires_body=true, binary_body_mode=true
 
 [MITM]
 hostname = vv.video.qq.com, vv6.video.qq.com, i.video.qq.com, iwan.video.qq.com
