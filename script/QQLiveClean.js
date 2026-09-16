@@ -617,10 +617,25 @@
     if (raw.length <= 32) return null;
     var out = processResponse(raw);
     if (!out || out.length === raw.length) return null;
-    var sent = out;
-    if (wantsGzip || bodyIsGzip) sent = gzipStored(out);
-    log('精简 ' + reqUrl + '：' + raw.length + ' -> ' + out.length + ' 字节' + ((wantsGzip || bodyIsGzip) ? '（gzip 打包返回）' : ''));
-    return sent;
+    // 输出策略：始终返回明文 body，并移除 content-encoding/content-length 头，
+    // 让客户端按明文解析（Loon 会自行重算 content-length）。
+    // 注意：不要在这里自行 gzip 打包——实测 Loon 3.5 会对脚本输出做二次编码处理，gzip 打包会导致客户端解码失败。
+    var headersOut = {};
+    for (var hk in (response.headers || {})) {
+      var lk = hk.toLowerCase();
+      if (lk === 'content-encoding' || lk === 'content-length') continue;
+      headersOut[hk] = response.headers[hk];
+    }
+    log('精简 ' + reqUrl + '：' + raw.length + ' -> ' + out.length + ' 字节（明文返回' + (ce.indexOf('gzip') >= 0 ? '，已移除 gzip 头' : '') + '）');
+    try {
+      if (typeof $persistentStore !== 'undefined' && typeof $notification !== 'undefined') {
+        if (!$persistentStore.read('qqvc_notified')) {
+          $persistentStore.write('1', 'qqvc_notified');
+          $notification.post('腾讯视频去广告', '净化已生效 ✓', '示例：' + raw.length + ' -> ' + out.length + ' 字节');
+        }
+      }
+    } catch (e) {}
+    return { body: out, headers: headersOut };
   }
 
   // ---------------- 入口 ----------------
@@ -635,9 +650,9 @@
     if (typeof $response !== 'undefined' && $response) {
       var reqUrl = ($request && $request.url) || '';
       if (reqUrl.indexOf('i.video.qq.com') >= 0) {
-        var respBody = handleResponse(reqUrl, $response);
-        if (respBody) {
-          finish({ body: respBody });
+        var respObj = handleResponse(reqUrl, $response);
+        if (respObj) {
+          finish({ body: respObj.body, headers: respObj.headers });
           return;
         }
       }
