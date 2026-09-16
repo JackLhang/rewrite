@@ -31,7 +31,6 @@
 //      · 「我的」页：去除运营推广项、VIP 营销卡与左上角游戏中心
 //   说明：开屏广告由模块 [Rule] 拦截，不在此脚本处理
 // ============================================================
-
 // ============================================================
 // 腾讯视频去广告 / 界面精简  (适配 iOS 9.04.46.25021)
 // 适用：Surge / Loon / Stash（响应脚本需开启 binary-body-mode）
@@ -52,11 +51,11 @@
   'use strict';
 
   // ---------------- 目标清单 ----------------
-  var NAV_TABS = ['短剧', '好物', '好片', '短视频']; // 顶部频道 + 底部 tab
+  var NAV_TABS = ['短剧', '好物', '好片']; // 顶部频道 + 底部 tab
   var MY_ITEMS = [ // 「我的」页：运营推广项 + VIP 营销卡标题 + 顶部游戏中心
     '特惠升级SVIP', '新人16元看比赛', 'JUMP卡上新', '年轻人专属会员', '优惠宽带送VIP',
     '游戏福利', 'GOODS商城', '免费看漫剧', '免费领会员', '摸鱼免费玩',
-    '我的游戏', '爱玩游戏', '免流量领会员', '领权益送会员','额度',
+    '我的游戏', '爱玩游戏', '免流量领会员', '领权益送会员',
     '游戏' // 「我的」页左上角游戏中心入口（sp_mycntr_ceiling）
   ];
   var AD_METHODS = [ // 广告类 TRPC 方法名片段（命中断言 URL 或请求体）
@@ -71,11 +70,25 @@
   ];
   // 广告卡特征（统一按字节匹配，兼容二进制混排字段）
   var AD_EXACT = ['广告']; // 精确等值（广告标签）
-  var AD_FEATS = ['ad_pos_id', 'rerank_ad_info', 'ad_ecpm', 'advertiser', 'ad_orderid', 'is_locked_ad', 'ad_block_']; // 广告 SDK 字段/参数
-  var AD_TEXTS = ['专属咨询顾问', '打开微信客服获取更多内容']; // 咨询类广告卡文案
-  var AD_URLS = ['pgdt.gtimg.cn', 'review.gdtimg.com', 'c.l.qq.com/click', 'gdtimg']; // 广告素材/跳转域
+  // 广告 SDK 字段/参数。后 7 项来自 2026-09-16 真机抓包（仅出现在 channel$120159 / channel$100101 / 广告负反馈帧中）
+  var AD_FEATS = ['ad_pos_id', 'rerank_ad_info', 'ad_ecpm', 'advertiser', 'ad_orderid', 'is_locked_ad', 'ad_block_',
+    'whole_ad_type', 'ad_group_id', 'ad_is_bidding', 'ad_pr_type', 'ad_empty_reason', 'ad_reportkey_scd', 'ad_nfb_'];
+  var AD_TEXTS = ['专属咨询顾问', '打开微信客服获取更多内容', '本内容为广告', '广告内容由', '该内容为广告', '品牌广告']; // 咨询类广告卡文案 + 广告标识文案
+  var AD_URLS = ['pgdt.gtimg.cn', 'review.gdtimg.com', 'c.l.qq.com/click', 'gdtimg', 'e.qq.com', 'mi.gdt.', 'gdtvideo', 'track.l.qq.com', 'wxh.l.qq.com']; // 广告素材/跳转域（GDT 点击与素材链）
+  // 可选加强特征：默认关闭。误伤为零时再并入（在下面的 USE_EXTRA 里打开），也可按需删掉个别词。
+  var AD_FEATS_EXTRA = ['adInfo', 'ad_info', 'is_ad', 'adType', 'ad_type', 'feed_ad', 'ad_list', 'adx_', 'ad_report_params', 'mind_url'];
+  var USE_EXTRA = false;
+  // 顶部频道/底部 Tab 可选扩充项（如 短视频/体育/少儿 等，按自己需要打开）
+  var NAV_TABS_EXTRA = ['短视频', '少儿', '短番', '动漫']; // 少儿/短番 已在真采集 hot$1 导航中确认存在
+  var USE_NAV_EXTRA = false;
   var AD_URLPARAMS = ['ad_playmode=', 'ad_is_fail=', 'ad_loca=', 'ad_idx=', 'ad_trans_native=', 'ad_schedule_ability=', 'ad_fixed_pctr=', 'ad_product_id=']; // 广告跳转链参数
-  var FEAT_NAV = 'EditChannelListActivity';  // 顶部频道导航响应特征
+  // 真采集核对：EditChannelListActivity 在 259 条请求的 92 个帧响应里出现 0 次（只有进「编辑频道」页才会出现），
+  // 顶部频道条（servicetag=hot$1）的真实特征是 icon_name + jumpChannel / videoCategory。
+  var FEAT_NAV = 'EditChannelListActivity';  // 顶部频道导航响应特征（编辑频道页）
+  var FEAT_NAV2 = 'jumpChannel';             // 顶部频道条（首页那排频道）响应特征
+  var FEAT_NAV2B = 'icon_name';
+  var COMMERCE_ITEMS = ['IP好物', '角色好物', '小店热卖好物', '火热抢购中']; // 商城/带货入口（默认关，见 USE_COMMERCE）
+  var USE_COMMERCE = false;
   var FEAT_BOTTOM = 'GetTabListRsp';         // 底部 tab 响应特征
   var FEAT_MY1 = 'user_center_top_function'; // 我的页特征
   var FEAT_MY2 = 'user_center_more_function';
@@ -103,6 +116,122 @@
     for (var i = 0; i < s.length; i++) arr[i] = s.charCodeAt(i) & 0xff;
     return arr;
   }
+  // ---------------- Loon 兼容性修补层（body 取值 / 诊断） ----------------
+  var B64A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  function b64ToU8(s) {
+    if (typeof s !== 'string' || s.length < 8 || s.length % 4 === 3) return null;
+    var clean = s.replace(/[\r\n\t ]/g, '');
+    if (clean.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(clean)) return null;
+    var len = clean.length, pad = 0;
+    while (clean.charAt(len - 1 - pad) === '=') pad++;
+    var out = new Uint8Array(Math.floor(clean.length * 3 / 4) - pad), o = 0, i;
+    for (i = 0; i < clean.length - pad * 4; i += 4) {
+      var c0 = B64A.indexOf(clean.charAt(i)), c1 = B64A.indexOf(clean.charAt(i + 1)),
+          c2 = B64A.indexOf(clean.charAt(i + 2)), c3 = B64A.indexOf(clean.charAt(i + 3));
+      if (c0 < 0 || c1 < 0 || c2 < 0 || c3 < 0) return null;
+      out[o++] = (c0 << 2) | (c1 >> 4);
+      out[o++] = ((c1 & 15) << 4) | (c2 >> 2);
+      out[o++] = ((c2 & 3) << 6) | c3;
+    }
+    for (; i < clean.length; i += 4) {
+      var d0 = B64A.indexOf(clean.charAt(i)), d1 = B64A.indexOf(clean.charAt(i + 1));
+      var d2 = clean.charAt(i + 2) === '=' ? -1 : B64A.indexOf(clean.charAt(i + 2));
+      if (d0 < 0 || d1 < 0) return null;
+      out[o] = (d0 << 2) | (d1 >> 4); o++;
+      if (d2 >= 0) { out[o] = ((d1 & 15) << 4) | (d2 >> 2); o++; }
+    }
+    return o === out.length ? out : out.subarray(0, o);
+  }
+  function isGzipBytes(u) { return !!u && u.length > 17 && u[0] === 0x1F && u[1] === 0x8B && u[2] === 0x08; }
+  function isFrameBytes(u) { return !!u && u.length > 32 && u[0] === 0x09 && u[1] === 0x30; }
+  function hexOf(u, n) { var s = ''; for (var i = 0; i < Math.min(n || 8, u.length); i++) { s += (u[i] < 16 ? '0' : '') + u[i].toString(16); s += ' '; } return s.trim(); }
+  // 依次尝试 bodyBytes / body(Uint8Array) / body(latin1 string) / body(base64 string)，返回最可信的字节数组
+  function pickBodyBytes(resp) {
+    var cands = [];
+    if (resp.bodyBytes) { var bb = toU8(resp.bodyBytes); if (bb) cands.push({ from: 'bodyBytes', u: bb }); }
+    var b = resp.body;
+    if (b != null && typeof b !== 'string') { var bu = toU8(b); if (bu) cands.push({ from: 'body(Uint8Array)', u: bu }); }
+    if (typeof b === 'string') {
+      var latin = toU8(b); if (latin) cands.push({ from: 'body(latin1 string)', u: latin });
+      var dec = b64ToU8(b); if (dec) cands.push({ from: 'body(base64)', u: dec });
+      if (b.indexOf('\uFFFD') >= 0) cands.push({ from: 'body(已被UTF-8解码，二进制不可恢复)', u: null });
+    }
+    for (var i = 0; i < cands.length; i++) if (isGzipBytes(cands[i].u) || isFrameBytes(cands[i].u)) return cands[i];
+    for (var j = 0; j < cands.length; j++) if (cands[j].u) return cands[j];
+    return cands.length ? cands[0] : null;
+  }
+  // 诊断通知：同一类问题一天最多一次，避免刷屏
+  function diagnose(kind, detail) {
+    try {
+      if (typeof $persistentStore === 'undefined' || typeof $notification === 'undefined') return;
+      var day = new Date().toISOString().slice(0, 10);
+      var key = 'qqvc_diag_' + kind, last = '';
+      try { last = $persistentStore.read(key) || ''; } catch (e) {}
+      if (last === day) return;
+      $persistentStore.write(day, key);
+      $notification.post('腾讯视频去广告·诊断', kind, String(detail || '').slice(0, 220));
+    } catch (e) {}
+  }
+
+  // ---------------- 侦察模式（只上报样本，不改变删除逻辑） ----------------
+  // 插件里 #!select = recon,关闭,开启  或  #!input = reportUrl（webhook，如 ntfy / PushDeer / 自建收集地址）
+  var RECON = false, REPORT_URL = '', REPORT_MAX = 40, _reportSeq = 0;
+  (function () {
+    try {
+      if (typeof $persistentStore !== 'undefined') {
+        var r = String($persistentStore.read('recon') || '');
+        if (r === '开启' || r === 'on' || r === '1' || r === 'true') RECON = true;
+        REPORT_URL = String($persistentStore.read('reportUrl') || '').trim();
+      }
+    } catch (e) {}
+    try { if (typeof $argument === 'string' && $argument.indexOf('recon=on') >= 0) RECON = true; } catch (e2) {}
+  })();
+  function walkStrings(bytes, msg, depth, bag, cnt) {
+    if (!msg || depth > 6 || cnt.n > 4000) return;
+    for (var i = 0; i < msg.length; i++) {
+      var fl = msg[i]; cnt.n++;
+      if (fl.w === 2 && fl.len >= 1 && fl.len <= 96) {
+        var t = utf8Of(bytes, fl.vStart, fl.vEnd);
+        if (t !== null && t.length) bag[t] = (bag[t] || 0) + 1;
+      }
+      if (fl.w === 2 && fl.len >= 2) {
+        var sub = parseMessage(bytes, fl.vStart, fl.vEnd);
+        if (sub !== null) walkStrings(bytes, sub, depth + 1, bag, cnt);
+      }
+    }
+  }
+  function topN(bag, n) {
+    var arr = []; for (var k in bag) arr.push([k, bag[k]]);
+    arr.sort(function (a, b) { return b[1] - a[1]; });
+    return arr.slice(0, n).map(function (x) { return x[0] + ' ×' + x[1]; });
+  }
+  function reconReport(reqUrl, response, raw, out, note) {
+    if (!RECON || _reportSeq >= REPORT_MAX) return;
+    _reportSeq++;
+    try {
+      var parts = reqUrl.split('/'), host = parts[2] || '', path = parts.length > 3 ? '/' + parts[3] : '/';
+      var msg = parseMessage(raw, 16, raw.length), bag = {}, cnt = { n: 0 };
+      if (msg) walkStrings(raw, msg, 0, bag, cnt);
+      var text = toStr(raw), hits = [], i;
+      var named = AD_FEATS.concat(USE_EXTRA ? AD_FEATS_EXTRA : [], AD_TEXTS, AD_URLS, AD_URLPARAMS, ['广告'], NAV_TABS, NAV_TABS_EXTRA, MY_ITEMS);
+      for (i = 0; i < named.length; i++) if (text.indexOf(latinOf(named[i])) >= 0) hits.push(named[i]);
+      var stag = '';
+      try { stag = headerGet(($request && $request.headers) || {}, 'servicetag'); } catch (e0) {}
+      var rep = { seq: _reportSeq, host: host, path: path, tag: stag, note: note || '',
+        enc: headerGet(response.headers, 'content-encoding') || '-', rawLen: raw.length,
+        outLen: out ? out.length : 0, head: hexOf(raw, 16), feats: hits, strings: topN(bag, 45) };
+      var str = JSON.stringify(rep);
+      log('RECON ' + str.slice(0, 1500));
+      try { if (typeof $persistentStore !== 'undefined') $persistentStore.write(str, 'qqvc_report_' + (_reportSeq % 10)); } catch (e2) {}
+      if (REPORT_URL && typeof $httpClient !== 'undefined' && $httpClient && $httpClient.post) {
+        $httpClient.post({ url: REPORT_URL, headers: { 'Content-Type': 'application/json' }, body: str }, function () {});
+      } else if (typeof $notification !== 'undefined') {
+        $notification.post('腾讯视频侦察 #' + _reportSeq, host + path + ' ' + raw.length + 'B → ' + (out ? out.length : raw.length) + 'B',
+          note + '｜命中特征 ' + hits.length + ' 项：' + hits.slice(0, 5).join(', '));
+      }
+    } catch (e) {}
+  }
+
   function toStr(b) {
     if (typeof b === 'string') return b;
     if (b instanceof Uint8Array) {
@@ -155,7 +284,7 @@
   for (var _ei = 0; _ei < AD_EXACT.length; _ei++) AD_EXACT_L.push(latinOf(AD_EXACT[_ei]));
   var AD_NEEDLES = [];
   (function () {
-    var all = AD_FEATS.concat(AD_TEXTS, AD_URLS, AD_URLPARAMS);
+    var all = AD_FEATS.concat(USE_EXTRA ? AD_FEATS_EXTRA : [], AD_TEXTS, AD_URLS, AD_URLPARAMS);
     for (var i = 0; i < all.length; i++) AD_NEEDLES.push(latinOf(all[i]));
   })();
 
@@ -546,9 +675,11 @@
     var targets = null;
     if (text.indexOf(FEAT_MY1) >= 0 || text.indexOf(FEAT_MY2) >= 0 || text.indexOf(FEAT_MY3) >= 0) {
       targets = MY_ITEMS;
-    } else if (text.indexOf(FEAT_NAV) >= 0 || text.indexOf(FEAT_BOTTOM) >= 0) {
-      targets = NAV_TABS;
+    } else if (text.indexOf(FEAT_NAV) >= 0 || text.indexOf(FEAT_BOTTOM) >= 0 ||
+               (text.indexOf(FEAT_NAV2) >= 0 && text.indexOf(FEAT_NAV2B) >= 0)) {
+      targets = USE_NAV_EXTRA ? NAV_TABS.concat(NAV_TABS_EXTRA) : NAV_TABS.slice();
     }
+    if (USE_COMMERCE) targets = (targets || []).concat(COMMERCE_ITEMS);
 
     var msg = parseMessage(body, 16, body.length);
     if (!msg) return null;
@@ -604,20 +735,45 @@
     return '';
   }
   function handleResponse(reqUrl, response) {
-    var rb = toU8(response.body);
-    if (!rb || rb.length <= 2) return null;
+    var picked = pickBodyBytes(response);
+    var rb = picked && picked.u;
+    if (!rb || rb.length <= 2) {
+      diagnose('① 脚本命中但拿不到响应体',
+        'requires-body 可能未生效（插件里请写 requires-body=true，不要写 =1）。url=' + reqUrl +
+        ' 取值来源=' + (picked ? picked.from : '无 body') + ' 长度=' + (rb ? rb.length : 0));
+      return null;
+    }
     var ce = headerGet(response.headers, 'content-encoding').toLowerCase();
     var wantsGzip = ce.indexOf('gzip') >= 0;
-    var bodyIsGzip = rb[0] === 0x1F && rb[1] === 0x8B;
+    var bodyIsGzip = isGzipBytes(rb);
     var raw = rb;
     if (bodyIsGzip) {
       var inf = inflateGzip(rb);
-      if (!inf) { log('gzip 解压失败，跳过 len=' + rb.length); return null; }
+      if (!inf) { log('gzip 解压失败，跳过 len=' + rb.length); diagnose('② gzip 解压失败', 'len=' + rb.length + ' 头=' + hexOf(rb, 12)); return null; }
       raw = inf;
     }
     if (raw.length <= 32) return null;
+    if (!isFrameBytes(raw)) {
+      diagnose('③ 帧头不认识（多半是域名/接口已换）',
+        '取值来源=' + picked.from + ' 前16字节=' + hexOf(raw, 16) + ' 长度=' + raw.length +
+        ' encoding=' + (ce || '-') + ' url=' + reqUrl.slice(0, 120));
+      return null;
+    }
+    var total = (raw[5] << 16) | (raw[6] << 8) | raw[7];
+    if (total !== raw.length) {
+      diagnose('④ 帧内长度与实际不符（多帧/截断，或 body 被文本化解码）', '声明=' + total + ' 实际=' + raw.length + ' 来源=' + picked.from + ' 前16=' + hexOf(raw, 16) + '；若来源是 string 且长度不符，请把插件里的 binary-body-mode 设为 true');
+      return null;
+    }
     var out = processResponse(raw);
-    if (!out || out.length === raw.length) return null;
+    if (!out || out.length === raw.length) {
+      var t = toStr(raw);
+      var known = t.indexOf(FEAT_NAV) >= 0 || t.indexOf(FEAT_BOTTOM) >= 0 || t.indexOf(FEAT_MY1) >= 0 ||
+                  t.indexOf(FEAT_MY2) >= 0 || t.indexOf(FEAT_MY3) >= 0 || t.indexOf('ad_pos_id') >= 0;
+      if (known) diagnose('⑤ 命中特征但未能删卡（结构变化）', '长度=' + raw.length + ' url=' + reqUrl.slice(0, 120));
+      reconReport(reqUrl, response, raw, null, known ? '命中特征但未删卡' : '未命中任何目标');
+      return null;
+    }
+    reconReport(reqUrl, response, raw, out, '已删卡改包');
     // 输出策略：始终返回明文 body，并移除 content-encoding/content-length 头，
     // 让客户端按明文解析（Loon 会自行重算 content-length）。
     // 注意：不要在这里自行 gzip 打包——实测 Loon 3.5 会对脚本输出做二次编码处理，gzip 打包会导致客户端解码失败。
@@ -650,7 +806,7 @@
   try {
     if (typeof $response !== 'undefined' && $response) {
       var reqUrl = ($request && $request.url) || '';
-      if (reqUrl.indexOf('i.video.qq.com') >= 0) {
+      if (reqUrl.indexOf('i.video.qq.com') >= 0 || reqUrl.indexOf('iwan.video.qq.com') >= 0) {
         var respObj = handleResponse(reqUrl, $response);
         if (respObj) {
           finish({ body: respObj.body, headers: respObj.headers });
@@ -663,10 +819,15 @@
 
     if (typeof $request !== 'undefined' && $request) {
       var url = $request.url || '';
-      var rawBody = $request.body || '';
+      var rawBody = $request.body;
+      if (rawBody == null && $request.bodyBytes != null) rawBody = $request.bodyBytes;
       var reqStr = '';
       if (typeof rawBody === 'string') reqStr = rawBody;
       else { var reqU8 = toU8(rawBody); if (reqU8) reqStr = toStr(reqU8); }
+
+      // -1) 自证：脚本确实被 Loon 加载并命中（每天提醒一次，用于排查「完全没效果」）
+      diagnose('✅ 脚本已加载并命中 http-request', 'url=' + url.slice(0, 160) +
+        (rawBody == null ? ' （注意：$request.body 为空 → requires-body 未生效）' : ' 请求体长度=' + (reqStr ? reqStr.length : 0)));
 
       // 0) vmind 兼容：返回空 JSON（Loon 无 [Map Local]，改由脚本实现；旧链路广告视频接口）
       if ((url.indexOf('vv.video.qq.com') >= 0 || url.indexOf('vv6.video.qq.com') >= 0) &&
@@ -697,9 +858,20 @@
       // 2) 广告类 TRPC 请求拦截（方法名在 URL path 或 body 均可命中）
       if (url.indexOf('i.video.qq.com') >= 0 || url.indexOf('iwan.video.qq.com') >= 0) {
         var hay = url + '\n' + reqStr;
-        var blocked = false;
-        for (var k = 0; k < AD_METHODS.length; k++) {
-          if (hay.indexOf(AD_METHODS[k]) >= 0) { blocked = true; break; }
+        var blocked = false, k;
+        for (k = 0; k < AD_METHODS.length; k++) { if (hay.indexOf(AD_METHODS[k]) >= 0) { blocked = true; break; } }
+        // 真采集：TRPC 方法名 0/92 出现在 URL、13/92 只出现在请求体；且请求头带 content-encoding: gzip
+        // → 明文搜不到时，把 body 当作 gzip 再解压一次重搜（否则这批接口拦截 100% 漏掉）
+        if (!blocked && reqStr) {
+          var bu = toU8(reqStr);
+          if (!bu && typeof rawBody !== 'string') bu = toU8(rawBody);
+          if (bu && bu.length > 18 && bu[0] === 0x1F && bu[1] === 0x8B) {
+            var inf = inflateGzip(bu);
+            if (inf) {
+              var hay2 = url + '\n' + toStr(inf);
+              for (k = 0; k < AD_METHODS.length; k++) { if (hay2.indexOf(AD_METHODS[k]) >= 0) { blocked = true; log('广告接口命中于 gzip 请求体'); break; } }
+            }
+          }
         }
         if (blocked) {
           log('拦截广告接口: ' + url);
@@ -720,8 +892,6 @@
     finish({});
   }
 })();
-
-
 
 
 

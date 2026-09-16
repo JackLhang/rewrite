@@ -1,62 +1,100 @@
-#!name=腾讯视频去广告
-#!desc=过滤腾讯视频客户端广告并精简界面（适配 iOS 9.04.46.25021）：阻断开屏广告、首页feed动画广告卡、个人中心横幅/视频广告、播放贴片/试看广告、激励广告、浮窗活动与 VIP 推广；精简顶部频道与底部 Tab（去除短剧/好物/好片）；清理「我的」页游戏中心、运营推广项与 VIP 营销卡。需开启 MitM 与脚本功能。
-#!author=RuCu6 + 9.x 适配
+#!name=腾讯视频去广告+界面精简（Loon v3·真机抓包校订）
+#!desc=按 2026-09-16 iOS 9.04.50 真机抓包校订：整份文件不含反斜杠（原双反斜杠导致脚本永不命中）；requires-body=true；撤掉会误杀正片的 omexts 拦截；补齐抓包里真实存在的广告/埋点域名；广告接口拦截下沉到脚本（抓包证实方法名不在 URL）。需信任 Loon 证书、开启 MITM、分流模式。
+#!author=RuCu6 + 9.x 适配 / v3 抓包校订
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Tencent_Video.png
 #!category=BetaPlugin
 #!openUrl=https://apps.apple.com/app/id458318329
 #!tag=去广告
 #!system=ios
-#!loon_version=3.2.4(787)
+#!loon_version=3.5.1(992)
 #!homepage=https://hub.kelee.one
-#!date=2026-09-15
+#!date=2026-09-16 17:25:16
+
+#!input = reportUrl
+#!select = recon,off,on
+
+[General]
+# 抓包证据：i.video.qq.com 的 94 条响应里 92 条回 alt-svc: quic=":443"，且 getconf 下发 EnableQuicInit=true。
+# 不把这些域名拉回 TCP，MitM 与脚本会整体失效。个别版本插件 [General] 不认这个键，无效时复制到主配置同名段。
+force-http-engine-hosts = vv.video.qq.com, vv6.video.qq.com, i.video.qq.com, iwan.video.qq.com
 
 [Rule]
-# 阻断 QUIC(HTTP/3)：否则腾讯视频走 QUIC 会绕过 MitM，脚本与 URL 规则全部失效。
-# 全局生效（影响所有 App 的 QUIC），如不想要可删除本行，代价是部分广告可能漏拦。
-AND,((PROTOCOL,UDP),(DEST-PORT,443)),REJECT-DROP
-# 开屏广告：video-mobile-tech 子域仅承载冷启动 Splash 配置，整域拦截即可去掉开屏广告
+# —— QUIC 兜底：只在上一行不生效时打开（代价：所有 App 的 HTTP/3 都断）
+# AND,((PROTOCOL,UDP),(DEST-PORT,443)),REJECT-DROP
+AND,((PROTOCOL,QUIC),(DOMAIN-SUFFIX,video.qq.com)),REJECT-DROP
+
+# —— 开屏
 DOMAIN,video-mobile-tech-1258344701.shiply-cdn.qq.com,REJECT
-# 原模块广告域名拦截（保留）
+
+# —— 广告 SDK / 归因 / 变现（抓包实测存在的接口路径已写在行尾）
 DOMAIN,adsmind.gdtimg.com,REJECT
-DOMAIN,info4.video.qq.com,REJECT
-DOMAIN,info6.video.qq.com,REJECT
-DOMAIN,ios.video.mpush.qq.com,REJECT
-DOMAIN,otheve.beacon.qq.com,REJECT
 DOMAIN,pgdt.gtimg.cn,REJECT
-DOMAIN,tpns.qq.com,REJECT
 DOMAIN-SUFFIX,gdt.qq.com,REJECT
 DOMAIN-SUFFIX,l.qq.com,REJECT
-DOMAIN-KEYWORD,trace.qq.com,REJECT
-DOMAIN-KEYWORD,trace.video.qq.com,REJECT
-IP-CIDR,47.110.187.87/32,REJECT,no-resolve
-# 注意：新版播放信息(getvinfo/batchvinfo/checktime)已迁移到 vv6.video.qq.com，
-# 因此不再整域名 REJECT vv6.video.qq.com，改由脚本改写请求参数去广告
-# 新增：广告 SDK / 归因上报（含 iacc.stgw 子域，日志实测出现）
 DOMAIN,iacc.qq.com,REJECT
 DOMAIN,iacc.rec.qq.com,REJECT
 DOMAIN,iacc.stgw.qq.com,REJECT
-DOMAIN,mazu.m.qq.com,REJECT
-DOMAIN,tmfmazu.m.qq.com,REJECT
-# 9.04.50 新增：广告 SDK 富媒体投放域（tab_gray 动态配置 / 密文广告配置 / 统计上报）
 DOMAIN,rdelivery.qq.com,REJECT
-# 9.04.50 新增：广告视频素材 CDN（截图顶部/Feed 视频广告分片源）
-DOMAIN,omexts.tc.qq.com,REJECT
-# 9.04.50 新增：GOODS 商城页 compose 配置（我的页商城页数据）
+DOMAIN,playproxy.video.qq.com,REJECT
+DOMAIN,richmedia.video.qq.com,REJECT
+DOMAIN,cloud.tgpa.qq.com,REJECT
+DOMAIN,hc.tdm.qq.com,REJECT
+DOMAIN,receiver.tdm.qq.com,REJECT
+
+# —— 埋点 / 遥测 / 设备注册（挡掉不影响播放与登录）
+DOMAIN,snowflake.qq.com,REJECT
+DOMAIN,szmg.qq.com,REJECT
+DOMAIN,tgwsc.qq.com,REJECT
+DOMAIN,info4.video.qq.com,REJECT
+DOMAIN,info6.video.qq.com,REJECT
+DOMAIN,otheve.beacon.qq.com,REJECT
+DOMAIN,ios.video.mpush.qq.com,REJECT
+DOMAIN,tpns.qq.com,REJECT
+DOMAIN-KEYWORD,trace.qq.com,REJECT
+DOMAIN-KEYWORD,trace.video.qq.com,REJECT
+IP-CIDR,47.110.187.87/32,REJECT,no-resolve
+
+# —— 好物商城（页面级，不是广告 SDK：整域拦会让「好物」页空白，按路径精确拦）
+URL-REGEX,^https?://vfiles.gtimg.cn/tvideo/script/vmall/[a-z0-9._-]+,REJECT
+URL-REGEX,^https?://pbaccess.video.qq.com/trpc.video_ec_promotion.vmall_subscribe.,REJECT
+DOMAIN,mall.video.qq.com,REJECT
 DOMAIN,video-vip-1258344701.shiply-cdn.qq.com,REJECT
 
-# 旧版广告视频 CDN（兼容保留）
-URL-REGEX,^http://[\\d\\.:]*/?(defaultts\\.tc|vmind\\.qqvideo\\.tc|finderpdd\\.video)\\.qq\\.com/\\w+,REJECT
-URL-REGEX,^http://apd-vlive\\.apdcdn\\.tc\\.qq\\.com/vmind\\.qqvideo\\.tc\\.qq\\.com/\\w+,REJECT
-URL-REGEX,^http://apd-\\w+\\.v\\.smtcdns\\.com/(defaultts|omts|vmind\\.qqvideo)\\.tc\\.qq\\.com/\\w+,REJECT
+# —— 小游戏预加载：这条 TRPC 方法名确实在 URL 里（抓包实测 iwan.video.qq.com/trpc.vgopen.mini_game_detail.../GetPreloadGames）
+URL-REGEX,^https?://i(wan)?.video.qq.com/trpc.vgopen.mini_game_detail.,REJECT
+
+# —— 可选（默认关）：disp-qryapi.3g.qq.com 抓包响应里返回 i.video.qq.com 的接入调度（unitResults），
+# 属于广告 SDK 的调度通道，但拦掉后客户端要走普通 DNS，个别网络下会变慢，确认无碍再打开。
+# DOMAIN,disp-qryapi.3g.qq.com,REJECT
+# —— 可选（默认关）：底部 Tab 远端配置。拦掉后 tab 走本地默认，可能反而让 短剧/好物 回归，请自测再开
+# DOMAIN,tab.video.qq.com,REJECT
+# DOMAIN,config.ab.qq.com,REJECT
+# —— 可选（默认关）：HTTPDNS（抓包 119.29.29.98 GET /d）。拦掉强制走系统 DNS，代价是其他用同一 IP 的 App
+# IP-CIDR,119.29.29.98/32,REJECT,no-resolve
+
+# —— 旧版 http:// 广告链（保持单条无反斜杠写法）
+URL-REGEX,^http://[0-9.:]+/?(defaultts.tc|vmind.qqvideo.tc|finderpdd.video).qq.com/[a-z0-9_]+,REJECT
+URL-REGEX,^http://apd-vlive.apdcdn.tc.qq.com/vmind.qqvideo.tc.qq.com/[a-z0-9_]+,REJECT
+URL-REGEX,^http://apd-[a-z0-9]+.v.smtcdns.com/(defaultts|omts|vmind.qqvideo).tc.qq.com/[a-z0-9_]+,REJECT
+
+# —— 重要更正：删掉了原版的 DOMAIN,omexts.tc.qq.com,REJECT
+# 抓包证据：omexts.tc.qq.com 出现在 i.video.qq.com 播放信息响应的片源字段（ul/ui/url，单集 3.8-6.8MB），
+# 并以 206 video/MP2T 分片被正常拉流 —— 它是正片片源，整域拦截会造成「有声音没画面 / 无法起播」。
+
+[Rewrite]
+# 抓包实测：i.video.qq.com 的请求路径恒为 POST /（servicetag 区分页面），TRPC 方法名只出现在请求体里。
+# 因此「广告接口拦截」不能靠 URL 复写，必须由脚本解压请求体后判定；这里只保留 URL 上真能命中的两条。
+request if ${url} ~= /^https?:\/\/vv6?.video.qq.com\/(diff|get)vmind/i then reject_dict(200)
+request if ${url} ~= /^https?:\/\/i(wan)?.video.qq.com\/trpc.vgopen.mini_game_detail.MiniGameDetail\/GetPreloadGames/i then reject_dict(200)
 
 [Script]
-# 脚本托管于 https://paste.rs/6vJtd（内容与仓库内 qqvideo-clean.js 一致；已内置 gzip 自适应与「首次生效通知」）
-# 可自行替换为你的托管地址，例如 https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js（须同步最新内容）
-# vmind 旧链路兼容：直接返回空 JSON（Loon 无 Map Local 功能，由本脚本实现）
-request if ${url} ~= /^https?:\\\/\\\/vv6?\\.video\\.qq\\.com\\\/(diff|get)vmind/i then script("https://paste.rs/6vJtd") with timeout=15, requires_body=true, binary_body_mode=true
-request if ${url} ~= /^https?:\\\/\\\/vv6?\\.video\\.qq\\.com\\\/(getvinfo|batchvinfo)/i then script("https://paste.rs/6vJtd") with timeout=15, requires_body=true, binary_body_mode=true
-request if ${url} ~= /^https?:\\\/\\\/(i\\.video\\.qq\\.com|iwan\\.video\\.qq\\.com)\\\//i then script("https://paste.rs/6vJtd") with timeout=15, requires_body=true, binary_body_mode=true
-response if ${url} ~= /^https?:\\\/\\\/i\\.video\\.qq\\.com\\\//i then script("https://paste.rs/6vJtd") with timeout=20, requires_body=true, binary_body_mode=true
+# 三处 script-path 请换成你自己的固定地址（paste.rs 默认 7 天过期；拉不到脚本时 [Script] 静默失效而 [Rule] 仍在）。
+# requires-body / binary-body-mode 必须是 true：响应是 gzip + protobuf，需要 Uint8Array 才能做改包手术。
+request if ${url} ~= /^https?:\/\/vv6?.video.qq.com\/(getvinfo|batchvinfo)/i then script("https://paste.rs/6vJtd") with tag="腾讯视频-去贴片试看", timeout=15, requires_body=true, binary_body_mode=true
+request if ${url} ~= /^https?:\/\/(i.video|iwan.video).qq.com\//i then script("https://paste.rs/6vJtd") with tag="腾讯视频-广告接口", timeout=15, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/(i.video|iwan.video).qq.com\//i then script("https://paste.rs/6vJtd") with tag="腾讯视频-响应精简", timeout=20, requires_body=true, binary_body_mode=true
 
 [MITM]
+# 抓包核对：92 个 MVL protobuf 帧响应 100% 来自 i.video.qq.com（含首页/频道/热榜/商城/我的/底部Tab），
+# 所以改包手术只需挂 i.video.qq.com 一个域名；其余 host 走 [Rule] 拦截即可。
 hostname = vv.video.qq.com, vv6.video.qq.com, i.video.qq.com, iwan.video.qq.com
