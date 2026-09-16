@@ -90,6 +90,7 @@ request if ${url} ~= /^https?:\/\/i(wan)?.video.qq.com\/trpc.vgopen.mini_game_de
 [Script]
 # 三处 script-path 请换成你自己的固定地址（paste.rs 默认 7 天过期；拉不到脚本时 [Script] 静默失效而 [Rule] 仍在）。
 # requires-body / binary-body-mode 必须是 true：响应是 gzip + protobuf，需要 Uint8Array 才能做改包手术。
+# https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js
 request if ${url} ~= /^https?:\/\/vv6?.video.qq.com\/(getvinfo|batchvinfo)/i then script("https://paste.rs/6vJtd") with tag="腾讯视频-去贴片试看", timeout=15, requires_body=true, binary_body_mode=true
 request if ${url} ~= /^https?:\/\/(i.video|iwan.video).qq.com\//i then script("https://paste.rs/6vJtd") with tag="腾讯视频-广告接口", timeout=15, requires_body=true, binary_body_mode=true
 response if ${url} ~= /^https?:\/\/(i.video|iwan.video).qq.com\//i then script("https://paste.rs/6vJtd") with tag="腾讯视频-响应精简", timeout=20, requires_body=true, binary_body_mode=true
