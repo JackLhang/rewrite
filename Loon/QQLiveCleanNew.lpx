@@ -1,44 +1,39 @@
-#!name=腾讯视频去广告+精简 (QQLiveClean)
-#!desc=基于 iOS 腾讯视频 v9.04.45 (live4iphoneRel) 抓包分析：去除首页/个人中心信息流广告、悬浮广告、VIP 促销卡、运营推广接口；精简「我的」页面（移除广告位与推广项）与底部 Tab 栏（去掉短剧/好物）。MVL 页面数据为 protobuf，由 QQLiveClean.js 无损改写响应；请勿改脚本与插件路径。
+#!name=腾讯视频去广告+精简
 #!author=Agentic Builder
-#!homepage=
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Tencent_Video.png
 #!openUrl=https://apps.apple.com/app/id458318329
 #!tag=去广告
 #!system=ios
 #!version=1.0.1
 #!date=2026-09-08
+#!desc=去开屏广告、视频前贴/中插广告、暂停广告，去掉底部多余 Tab 与「我的」页广告，并开启简洁模式
+#!author=TG@ZenMoFiShi（Loon 移植）
+#!date=2026-10-28 17:48:00
 
-[General]
+# ── 使用说明 ─────────────────────────────────────────────
+# 1. 脚本 txvideo-ad-clean.js 与本插件放在同一目录（同一仓库）即可，Loon 会按插件地址解析相对路径。
+# 2. 若提示脚本下载失败，把 script-path 改成可访问的完整地址，例如：
+# script-path=https://raw.githubusercontent.com/用户名/仓库名/main/txvideo-ad-clean.js
+# 3. 需要开启 Loon 的「MitM」与「脚本」总开关，并安装/信任证书，否则不会生效。
+# ────────────────────────────────────────────────────────
 
-[URL Rewrite]
-# ---- 腾讯广告 SDK / 广告素材 / 广告统计 ----
-request if ${url} ~= /^https?:\/\/iacc\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/iacc\.rec\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/rdelivery\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/cloud\.tgpa\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/hc\.tdm\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/receiver\.tdm\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/disp-qryapi\.3g\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/playproxy\.video\.qq\.com\/monet.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/vip\.video\.qq\.com\/rpc\/trpc\.vip_ad_promotion\..*/i then reject(200)
-request if ${url} ~= /^https?:\/\/pgdt\.gtimg\.cn\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/pgdt\.gtimg\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/gdtimg\.cn\/.*/i then reject(200)
-
-# ---- 埋点 / 遥测上报 ----
-request if ${url} ~= /^https?:\/\/galileotelemetry\.tencent\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/beacon\.cdn\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/aegis\.cdn-go\.cn\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/rumt-zh\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/trace\.inlong\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/szmg\.qq\.com\/.*/i then reject(200)
-request if ${url} ~= /^https?:\/\/snowflake\.qq\.com\/.*/i then reject(200)
+[Rule]
+# 广告上报/统计域名，直接拒绝
+DOMAIN,iacc.stgw.qq.com,REJECT
+DOMAIN,tacc.video.qq.com,REJECT
 
 [Script]
-# 增强了正则容错率，确保任何携带参数的网关请求都能正确触发 JS
-request if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="QQLive_adapi", timeout=10, requires_body=true
-response if ${url} ~= /^https?:\/\/i\.video\.qq\.com/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="QQLive_clean", timeout=15, requires_body=true
+[Script]
+# i.video.qq.com 请求侧：拦截开屏、贴片、信息流等广告 RPC
+request if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="腾讯视频-广告请求", timeout=60, requires_body=true
+# i.video.qq.com 响应侧：清理 protobuf(tRPC) 内的广告元素与多余 Tab
+response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="腾讯视频-播放页", timeout=60, requires_body=true
+# iacc.qq.com：JCE 二进制，处理播放提示、贴片广告、暂停广告、青少年弹窗
+response if ${url} ~= /^https?:\/\/iacc\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="腾讯视频-JCE", timeout=60, requires_body=true
+# config.ab.qq.com：AB 配置，开启简洁模式、关闭 QUIC 与预解析
+response if ${url} ~= /^https?:\/\/config\.ab\.qq\.com\/tab\/GetTabRemoteConfig(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="腾讯视频-AB配置", timeout=60, requires_body=true
+# rdelivery.qq.com：关闭 tab_gray 灰度
+response if ${url} ~= /^https:\/\/rdelivery\.qq\.com\/v1\/sdkconfig\/get(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="腾讯视频-灰度", timeout=60, requires_body=true
 
 [MITM]
-hostname = i.video.qq.com, iacc.qq.com, iacc.rec.qq.com, rdelivery.qq.com, cloud.tgpa.qq.com, hc.tdm.qq.com, receiver.tdm.qq.com, disp-qryapi.3g.qq.com, playproxy.video.qq.com, vip.video.qq.com, pgdt.gtimg.cn, pgdt.gtimg.com, gdtimg.cn, galileotelemetry.tencent.com, beacon.cdn.qq.com, aegis.cdn-go.cn, rumt-zh.com, trace.inlong.qq.com, szmg.qq.com, snowflake.qq.com
+hostname = %APPEND% i.video.qq.com, iacc.qq.com, config.ab.qq.com, rdelivery.qq.com
