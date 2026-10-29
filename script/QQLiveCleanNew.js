@@ -773,7 +773,7 @@
   // ── 诊断日志 ────────────────────────────────────────────────
   // 每次脚本执行给一个短 ID，按阶段打点：出问题时能看出停在哪一步。
   // 全部定位完把 DBG 改成 false 即可静音（"错误" 级日志不受影响）。
-  let DBG = true;
+  let DBG = false;
   let RID = "?", STAGE = "初始化";
   function L(stage, msg) {
     if (!DBG && stage !== "错误") return;
