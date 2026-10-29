@@ -772,8 +772,37 @@
 
   // ── 诊断日志 ────────────────────────────────────────────────
   // 每次脚本执行给一个短 ID，按阶段打点：出问题时能看出停在哪一步。
-  // 全部定位完把 DBG 改成 false 即可静音（"错误" 级日志不受影响）。
-  let DBG = false;
+  // 开关优先级：插件 [Argument] 里的 diag 开关 > 下面的 DBG_DEFAULT。
+  //   · 新版语法：script("...", {${diag}}) → $argument = {diag:true/false}
+  //   · 旧版语法：argument="diag=true"      → $argument 是字符串
+  //   · 都没有：用 DBG_DEFAULT
+  const DBG_DEFAULT = true;
+  function argFlag(a) {
+    if (a === undefined || a === null) return null;
+    if (typeof a === "boolean") return a;
+    if (typeof a === "number") return a !== 0;
+    if (typeof a === "object") {
+      const keys = ["diag", "debug", "log", "logging"];
+      for (let i = 0; i < keys.length; i++) {
+        if (typeof a[keys[i]] !== "undefined") return argFlag(a[keys[i]]);
+      }
+      return null;
+    }
+    if (typeof a === "string") {
+      const m = a.match(/(?:^|[&\s,])(?:diag|debug|log)\s*[=:]\s*([^&\s,}]+)/i);
+      if (m) return /^(1|true|on|yes)$/i.test(m[1].trim());
+      const s = a.trim();
+      if (/^(true|1|on|yes)$/i.test(s)) return true;
+      if (/^(false|0|off|no)$/i.test(s)) return false;
+    }
+    return null;
+  }
+  let DBG = (function () {
+    let a = null;
+    try { if (typeof $argument !== "undefined") a = $argument; } catch (e) { a = null; }
+    const v = argFlag(a);
+    return v === null ? DBG_DEFAULT : v;
+  })();
   let RID = "?", STAGE = "初始化";
   function L(stage, msg) {
     if (!DBG && stage !== "错误") return;
@@ -868,7 +897,7 @@
     const isResp = typeof $response !== "undefined" && $response !== null;
     RID = Date.now().toString(36).slice(-4) + (isResp ? "R" : "Q");
     STAGE = "入口";
-    L("入口", (IS_QX ? "QX" : "Loon") + " " + (isResp ? "响应" : "请求") + " host=" + host + " url=" + (url.length > 80 ? url.slice(0, 80) + "…" : url));
+    L("入口", (IS_QX ? "QX" : "Loon") + " " + (isResp ? "响应" : "请求") + " host=" + host + " diag=" + (DBG ? "on" : "off") + " url=" + (url.length > 80 ? url.slice(0, 80) + "…" : url));
     try {
       if (!isResp) {
         STAGE = "读取请求体";
@@ -913,4 +942,3 @@
   }
   main();
 })();
-

@@ -17,6 +17,9 @@
 # 3. 需要开启 Loon 的「MitM」与「脚本」总开关，并安装/信任证书，否则不会生效。
 # ────────────────────────────────────────────────────────
 
+[Argument]
+diag = switch,true,tag=诊断日志,desc=打开后在 Loon 日志里输出 txvideo-ad-clean 流水（排查用）
+
 [Rule]
 # 广告上报/统计域名，直接拒绝
 DOMAIN,iacc.stgw.qq.com,REJECT
@@ -24,15 +27,15 @@ DOMAIN,tacc.video.qq.com,REJECT
 
 [Script]
 # i.video.qq.com 请求侧：拦截开屏、贴片、信息流等广告 RPC
-request if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="腾讯视频-广告请求", timeout=60, binary_body_mode=true,requires_body=true,
+request if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag}}) with tag="腾讯视频-广告请求", timeout=60, binary_body_mode=true,requires_body=true,
 # i.video.qq.com 响应侧：清理 protobuf(tRPC) 内的广告元素与多余 Tab
-response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="腾讯视频-播放页", timeout=60, binary_body_mode=true,requires_body=true
+response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag}}) with tag="腾讯视频-播放页", timeout=60, binary_body_mode=true,requires_body=true
 # iacc.qq.com：JCE 二进制，处理播放提示、贴片广告、暂停广告、青少年弹窗
-response if ${url} ~= /^https?:\/\/iacc\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="腾讯视频-JCE", timeout=60, binary_body_mode=true,requires_body=true
+response if ${url} ~= /^https?:\/\/iacc\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag}}) with tag="腾讯视频-JCE", timeout=60, binary_body_mode=true,requires_body=true
 # config.ab.qq.com：AB 配置，开启简洁模式、关闭 QUIC 与预解析
-response if ${url} ~= /^https?:\/\/config\.ab\.qq\.com\/tab\/GetTabRemoteConfig(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="腾讯视频-AB配置", timeout=60, binary_body_mode=true, requires_body=true
+response if ${url} ~= /^https?:\/\/config\.ab\.qq\.com\/tab\/GetTabRemoteConfig(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag}}) with tag="腾讯视频-AB配置", timeout=60, binary_body_mode=true, requires_body=true
 # rdelivery.qq.com：关闭 tab_gray 灰度
-response if ${url} ~= /^https:\/\/rdelivery\.qq\.com\/v1\/sdkconfig\/get(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js") with tag="腾讯视频-灰度", timeout=60, binary_body_mode=true, requires_body=true
+response if ${url} ~= /^https:\/\/rdelivery\.qq\.com\/v1\/sdkconfig\/get(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag}}) with tag="腾讯视频-灰度", timeout=60, binary_body_mode=true, requires_body=true
 
 [MITM]
 hostname = i.video.qq.com, iacc.qq.com, config.ab.qq.com, rdelivery.qq.com
