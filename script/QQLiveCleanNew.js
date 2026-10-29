@@ -960,24 +960,28 @@
   }
   function onTrpcResponse(raw) {
     let u8 = raw, gz = false;
-    if (u8[0] === 0x1f && u8[1] === 0x8b) { u8 = gunzip(u8); gz = true; }
+    if (gzMagic(u8)) { u8 = gunzip(u8); gz = true; L("gunzip", "响应体解压后 " + btype(u8)); if (!u8) return null; }
     const fr = trpcFrame(u8);
-    if (!fr) return null;
+    if (!fr) { L("i.video", "不是 tRPC 帧（首字节 0x" + ((u8 && u8[0]) || 0).toString(16) + "），放行"); return null; }
     indexMarkers(u8, fr.he, u8.length);
+    L("i.video", "tRPC 帧 OK：头 " + fr.he + "B / 体 " + (u8.length - fr.he) + "B");
     const body = transform(u8, fr.he, u8.length);
-    if (!body) return null;
+    if (!body) { L("i.video", "解析完成，未命中广告元素，放行"); return null; }
     const out = concat([u8.subarray(0, fr.he), body]);
     put32(out, 4, out.length);
+    L("i.video", "清洗生效：" + u8.length + "→" + out.length + "B");
     return gz ? gzip(out) : out;
   }
   function onTrpcRequest(raw) {
     let u8 = raw, gz = false;
-    if (u8[0] === 0x1f && u8[1] === 0x8b) { u8 = gunzip(u8); gz = true; }
+    if (gzMagic(u8)) { u8 = gunzip(u8); gz = true; L("gunzip", "请求体解压后 " + btype(u8)); if (!u8) return null; }
     const fr = trpcFrame(u8);
-    if (!fr) return null;
+    if (!fr) { L("请求", "不是 tRPC 帧（首字节 0x" + ((u8 && u8[0]) || 0).toString(16) + "），放行"); return null; }
     const hd = parse(u8, fr.hs, fr.he), fn = hd && hd.find(x => x.f === 7 && x.w === 2);
     const func = fn ? ascii(u8, fn.vs, fn.e) : null;
-    if (!func || BLOCK_FUNCS.indexOf(func) < 0) return null;
+    if (!func) { L("请求", "tRPC 帧里没有 func 字段，放行"); return null; }
+    if (BLOCK_FUNCS.indexOf(func) < 0) { L("请求", "RPC=" + func + " 不在拦截名单"); return null; }
+    L("请求", "RPC=" + func + " 命中，改写广告位");
     const nb = utf8(func.slice(func.lastIndexOf("/") + 1)), out = u8.slice();
     for (let p = fr.hs; (p = find(out, nb, p, fr.he)) >= 0; p += nb.length) out[p] = out[p] === 0x58 ? 0x59 : 0x58;
     return gz ? gzip(out) : out;
@@ -1144,28 +1148,36 @@
   }
   function onJce(raw) {
     const b = raw, n = b.length;
-    if (n < 100 || b[0] !== 0x13 || u32(b, 1) !== n || b[n - 1] !== 0x03) return null;
+    if (n < 100 || b[0] !== 0x13 || u32(b, 1) !== n || b[n - 1] !== 0x03) {
+      L("iacc", "不是 JCE 包（len=" + n + " 首字节 0x" + ((b[0] || 0).toString(16)) + "），放行");
+      return null;
+    }
     const cmd = (b[8] << 16) | (b[9] << 8) | b[10];
+    L("iacc", "JCE cmd=" + cmd + " len=" + n);
     const fix = cmd === JCE_TEEN_CONFIG ? fixTeenConfig : cmd === JCE_PLAY_TIPS ? fixPlayTips : JCE_ROLL_ADS.indexOf(cmd) >= 0 ? fixRollAds : cmd === JCE_PAUSE_AD ? fixPauseAd : null;
-    if (!fix) return null;
+    if (!fix) { L("iacc", "cmd=" + cmd + " 不在处理列表"); return null; }
     const gz = find(b, new Uint8Array([0x1f, 0x8b, 0x08]), 60, Math.min(n, 140));
-    if (gz < 4) return null;
+    if (gz < 4) { L("iacc", "cmd=" + cmd + " 找不到内层 gzip 流"); return null; }
     const inner = gunzip(b.subarray(gz, n - 1));
     const m = inner.length;
-    if (u32(b, gz - 4) !== m || m < 18 || inner[0] !== 0x26 || u32(inner, 1) !== m || inner[m - 1] !== 0x28) return null;
+    if (u32(b, gz - 4) !== m || m < 18 || inner[0] !== 0x26 || u32(inner, 1) !== m || inner[m - 1] !== 0x28) {
+      L("iacc", "cmd=" + cmd + " 内层结构校验失败（m=" + m + "）");
+      return null;
+    }
     const top = jFields(inner, 16, m - 1), body = top.find(x => x.tag === 1 && x.t === 13);
-    if (!body) return null;
+    if (!body) { L("iacc", "cmd=" + cmd + " 内层没有 tag1 列表"); return null; }
     jHead(inner, body.vs);
     const bl = jInt(inner, VP), bs = VP;
-    if (bs + bl !== body.e) return null;
+    if (bs + bl !== body.e) { L("iacc", "cmd=" + cmd + " 内层列表长度不符"); return null; }
     const nb = fix(inner, bs, bs + bl);
-    if (!nb) return null;
+    if (!nb) { L("iacc", "cmd=" + cmd + " 修补函数返回空（该包本身无可删项）"); return null; }
     const ni = concat([inner.subarray(0, body.s), jSimpleList(1, nb), inner.subarray(body.e, m)]);
     put32(ni, 1, ni.length);
     const head = b.slice(0, gz);
     put32(head, gz - 4, ni.length);
     const out = concat([head, gzip(ni), new Uint8Array([0x03])]);
     put32(out, 1, out.length);
+    L("iacc", "cmd=" + cmd + " 已修补，输出 " + out.length + "B");
     return out;
   }
 
@@ -1214,9 +1226,9 @@
   const AB_NEEDLES = [utf8(SIMPLE_KEY), utf8("ios_nx_netframework_compatible"), utf8("network_resolve_config")];
   function onAbConfig(raw) {
     let u8 = raw, gz = false;
-    if (u8[0] === 0x1f && u8[1] === 0x8b) { u8 = gunzip(u8); gz = true; }
+    if (gzMagic(u8)) { u8 = gunzip(u8); gz = true; L("gunzip", "AB 配置解压后 " + btype(u8)); if (!u8) return null; }
     const top = parse(u8, 0, u8.length);
-    if (!top) return null;
+    if (!top) { L("AB", "protobuf 解析失败，放行"); return null; }
     const edits = new Map();
     let found = false;
     for (const x of top) {
@@ -1239,21 +1251,64 @@
     }
     let out = rebuild(u8, 0, u8.length, top, edits);
     if (!out && !found && top.some(x => x.f === 1 && x.w === 0 && x.v === 100) && top.some(x => x.f === 3 && x.w === 2)) out = concat([u8, lenField(3, simpleModeEntry())]);
-    if (!out) return null;
+    if (!out) { L("AB", "没有可补丁的 simple_mode 条目，放行"); return null; }
+    L("AB", "已补丁 " + edits.size + " 处，" + u8.length + "→" + out.length + "B");
     return gz ? gzip(out) : out;
   }
 
   const IS_QX = typeof $task !== "undefined"; // Quantumult X 提供 $task，Loon 没有
   const MAX_BODY = 8 * 1024 * 1024;
 
+  // ── 诊断日志 ────────────────────────────────────────────────
+  // 每次脚本执行给一个短 ID，按阶段打点：出问题时能看出停在哪一步。
+  // 全部定位完把 DBG 改成 false 即可静音（"错误" 级日志不受影响）。
+  let DBG = true;
+  let RID = "?", STAGE = "初始化";
+  function L(stage, msg) {
+    if (!DBG && stage !== "错误") return;
+    try {
+      if (typeof console !== "undefined" && console.log)
+        console.log("txvideo-ad-clean #" + RID + " [" + stage + "] " + msg);
+    } catch (e) {}
+  }
+  function btype(x) {
+    if (x === undefined) return "undefined";
+    if (x === null) return "null";
+    if (typeof x === "string") return "String(" + x.length + ")";
+    const tag = Object.prototype.toString.call(x).slice(8, -1);
+    return tag + "(" + (x && typeof x.length === "number" ? x.length : "?") + "B)";
+  }
+  function gzMagic(u8) { return !!u8 && u8.length > 2 && u8[0] === 0x1f && u8[1] === 0x8b; }
+
   // Loon：$request.body / $response.body 是 String 或 Uint8Array（binary-body-mode=true 时是 Uint8Array）
   // Quantumult X：只有 bodyBytes，没有 ArrayBuffer 形态的 body 之外的入口
   function readBody(o) {
-    if (!o) return null;
-    if (o.bodyBytes) return toU8(o.bodyBytes);
-    const b = o.body;
-    if (typeof b === "string") return b.length ? utf8(b) : null;
-    return toU8(b);
+    if (!o) { L("body", "没有 body 对象"); return null; }
+    try {
+      if (o.bodyBytes) {
+        const u = toU8(o.bodyBytes);
+        L("body", "取到 bodyBytes " + btype(u) + (gzMagic(u) ? " gzip" : ""));
+        return u;
+      }
+    } catch (e) {
+      L("body", "读 bodyBytes 抛错: " + e);
+    }
+    let b;
+    try {
+      b = o.body;
+    } catch (e) {
+      // 插件规则漏了 binary-body-mode=true 时，Loon 会把二进制 body 当 UTF-8 解码，
+      // 解码失败就在这里抛 "Convert body string error"，整段清洗逻辑会被跳过。
+      L("错误", "读 body 抛错: " + e + " —— 多半是脚本规则缺 binary-body-mode=true");
+      return null;
+    }
+    if (typeof b === "string") {
+      L("body", "取到 String(" + b.length + ")（说明没走二进制模式，二进制体到这一步已经损坏）");
+      return b.length ? utf8(b) : null;
+    }
+    const u = b ? toU8(b) : null;
+    L("body", u ? "取到 " + btype(u) + (gzMagic(u) ? " gzip" : "") : "body 类型无法识别: " + btype(b));
+    return u;
   }
 
   // Loon 没有 TextDecoder，这里自己解 UTF-8（只用于 rdelivery 的 JSON 配置）
@@ -1275,41 +1330,56 @@
 
   // 回写：Loon 用 body(Uint8Array)，QX 用 bodyBytes(ArrayBuffer)
   function finish(u8) {
-    if (!u8) { $done({}); return; }
-    if (IS_QX) $done({ bodyBytes: toBuf(u8) });
-    else $done({ body: u8 });
+    if (!u8) { L("回写", "放行原响应/请求（$done({})）"); $done({}); return; }
+    if (IS_QX) { L("回写", "bodyBytes " + u8.length + "B"); $done({ bodyBytes: toBuf(u8) }); }
+    else { L("回写", "body " + u8.length + "B"); $done({ body: u8 }); }
   }
 
   function main() {
     const url = $request.url || "", host = (url.split("/")[2] || "").split(":")[0];
     const isResp = typeof $response !== "undefined" && $response !== null;
+    RID = Date.now().toString(36).slice(-4) + (isResp ? "R" : "Q");
+    STAGE = "入口";
+    L("入口", (IS_QX ? "QX" : "Loon") + " " + (isResp ? "响应" : "请求") + " host=" + host + " url=" + (url.length > 80 ? url.slice(0, 80) + "…" : url));
     try {
       if (!isResp) {
+        STAGE = "读取请求体";
         const b = host === "i.video.qq.com" ? readBody($request) : null;
-        if (b && b.length > MAX_BODY) { $done({}); return; }
-        finish(b && b.length ? onTrpcRequest(b) : null);
+        if (!b) { L("跳过", "无请求体或读不到，放行"); $done({}); return; }
+        if (b.length > MAX_BODY) { L("跳过", "请求体 " + b.length + "B 超过上限，放行"); $done({}); return; }
+        STAGE = "请求清洗";
+        const out = onTrpcRequest(b);
+        L("完成", out ? "请求已改写 " + b.length + "→" + out.length + "B" : "请求无需改写 " + b.length + "B");
+        finish(out);
         return;
       }
       if (host === "rdelivery.qq.com") {
+        STAGE = "灰度配置";
         const raw = readBody($response);
-        const s = raw ? utf8Decode(raw) : "";
-        const o = /"tab_gray"\s*:\s*true/.test(s) ? s.replace(/("tab_gray"\s*:\s*)true/, "$1false") : null;
-        if (!o) { $done({}); return; }
+        if (!raw) { L("跳过", "灰度配置无响应体，放行"); $done({}); return; }
+        const s = utf8Decode(raw), hit = /"tab_gray"\s*:\s*true/.test(s);
+        L("灰度", "配置 " + s.length + " 字符，tab_gray=true? " + hit);
+        if (!hit) { L("回写", "放行原响应（$done({})）"); $done({}); return; }
+        const o = s.replace(/("tab_gray"\s*:\s*)true/, "$1false");
+        L("完成", "tab_gray 已关闭，" + s.length + " 字符");
         if (IS_QX) $done({ body: o });
         else $done({ body: utf8(o) });
         return;
       }
+      STAGE = "读取响应体";
       const b = readBody($response);
-      if (b && b.length > MAX_BODY) { $done({}); return; }
+      if (!b) { L("跳过", "无响应体，放行"); $done({}); return; }
+      if (b.length > MAX_BODY) { L("跳过", "响应体 " + b.length + "B 超过上限，放行"); $done({}); return; }
       let r = null;
-      if (b && b.length) {
-        if (host === "i.video.qq.com") r = onTrpcResponse(b);
-        else if (host === "iacc.qq.com") r = onJce(b);
-        else if (host === "config.ab.qq.com" && url.split("?")[0].endsWith("/tab/GetTabRemoteConfig")) r = onAbConfig(b);
-      }
+      if (host === "i.video.qq.com") { STAGE = "i.video 清洗"; r = onTrpcResponse(b); }
+      else if (host === "iacc.qq.com") { STAGE = "iacc JCE"; r = onJce(b); }
+      else if (host === "config.ab.qq.com" && url.split("?")[0].endsWith("/tab/GetTabRemoteConfig")) { STAGE = "AB 配置"; r = onAbConfig(b); }
+      else { L("跳过", "host=" + host + " 不处理，放行"); }
+      L("完成", r ? "已修改 " + b.length + "→" + r.length + "B" : "无变化，放行 " + b.length + "B");
       finish(r);
     } catch (e) {
-      try { if (typeof console !== "undefined" && console.log) console.log("txvideo-ad-clean: " + e); } catch (x) {}
+      const st = e && e.stack ? String(e.stack).split("\n")[1] : "";
+      L("错误", "在【" + STAGE + "】抛出: " + (e && e.message ? e.message : e) + (st ? " @" + st.trim() : ""));
       $done({});
     }
   }
