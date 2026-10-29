@@ -491,6 +491,9 @@
 // 腾讯视频净化 · Loon 脚本
 // 原版：Quantumult X 重写规则 + 脚本（作者 TG@ZenMoFiShi）
 // 移植：Loon（同一份脚本同时挂 http-request / http-response）
+// 说明：Loon 只提供 $request.body / $response.body（String 或 Uint8Array），
+//       没有 bodyBytes；插件需配 binary-body-mode=true，脚本回写用 $done({body})。
+//       同一份脚本在 Quantumult X 下仍走 bodyBytes，行为不变。
 //
 // 处理内容：
 //   i.video.qq.com        protobuf(tRPC) 响应：开屏/前贴/中插/信息流/我的页广告、底部 Tab
@@ -1240,26 +1243,63 @@
     return gz ? gzip(out) : out;
   }
 
+  const IS_QX = typeof $task !== "undefined"; // Quantumult X 提供 $task，Loon 没有
   const MAX_BODY = 8 * 1024 * 1024;
+
+  // Loon：$request.body / $response.body 是 String 或 Uint8Array（binary-body-mode=true 时是 Uint8Array）
+  // Quantumult X：只有 bodyBytes，没有 ArrayBuffer 形态的 body 之外的入口
+  function readBody(o) {
+    if (!o) return null;
+    if (o.bodyBytes) return toU8(o.bodyBytes);
+    const b = o.body;
+    if (typeof b === "string") return b.length ? utf8(b) : null;
+    return toU8(b);
+  }
+
+  // Loon 没有 TextDecoder，这里自己解 UTF-8（只用于 rdelivery 的 JSON 配置）
+  function utf8Decode(u) {
+    let s = "", i = 0;
+    const n = u.length;
+    while (i < n) {
+      const c = u[i++];
+      if (c < 0x80) s += String.fromCharCode(c);
+      else if (c > 0xbf && c < 0xe0) s += String.fromCharCode(((c & 0x1f) << 6) | (u[i++] & 0x3f));
+      else if (c > 0xdf && c < 0xf0) s += String.fromCharCode(((c & 0x0f) << 12) | ((u[i++] & 0x3f) << 6) | (u[i++] & 0x3f));
+      else {
+        const cp = ((c & 0x07) << 18) | ((u[i++] & 0x3f) << 12) | ((u[i++] & 0x3f) << 6) | (u[i++] & 0x3f);
+        s += cp > 0xffff ? String.fromCharCode(0xd7c0 + (cp >> 10), 0xdc00 + (cp & 0x3ff)) : String.fromCharCode(cp);
+      }
+    }
+    return s;
+  }
+
+  // 回写：Loon 用 body(Uint8Array)，QX 用 bodyBytes(ArrayBuffer)
+  function finish(u8) {
+    if (!u8) { $done({}); return; }
+    if (IS_QX) $done({ bodyBytes: toBuf(u8) });
+    else $done({ body: u8 });
+  }
 
   function main() {
     const url = $request.url || "", host = (url.split("/")[2] || "").split(":")[0];
     const isResp = typeof $response !== "undefined" && $response !== null;
     try {
       if (!isResp) {
-        const b = host === "i.video.qq.com" ? toU8($request.bodyBytes) : null;
+        const b = host === "i.video.qq.com" ? readBody($request) : null;
         if (b && b.length > MAX_BODY) { $done({}); return; }
-        const r = b && b.length ? onTrpcRequest(b) : null;
-        $done(r ? { bodyBytes: toBuf(r) } : {});
+        finish(b && b.length ? onTrpcRequest(b) : null);
         return;
       }
       if (host === "rdelivery.qq.com") {
-        const s = typeof $response.body === "string" ? $response.body : "";
+        const raw = readBody($response);
+        const s = raw ? utf8Decode(raw) : "";
         const o = /"tab_gray"\s*:\s*true/.test(s) ? s.replace(/("tab_gray"\s*:\s*)true/, "$1false") : null;
-        $done(o ? { body: o } : {});
+        if (!o) { $done({}); return; }
+        if (IS_QX) $done({ body: o });
+        else $done({ body: utf8(o) });
         return;
       }
-      const b = toU8($response.bodyBytes);
+      const b = readBody($response);
       if (b && b.length > MAX_BODY) { $done({}); return; }
       let r = null;
       if (b && b.length) {
@@ -1267,7 +1307,7 @@
         else if (host === "iacc.qq.com") r = onJce(b);
         else if (host === "config.ab.qq.com" && url.split("?")[0].endsWith("/tab/GetTabRemoteConfig")) r = onAbConfig(b);
       }
-      $done(r ? { bodyBytes: toBuf(r) } : {});
+      finish(r);
     } catch (e) {
       try { if (typeof console !== "undefined" && console.log) console.log("txvideo-ad-clean: " + e); } catch (x) {}
       $done({});
@@ -1275,3 +1315,4 @@
   }
   main();
 })();
+
