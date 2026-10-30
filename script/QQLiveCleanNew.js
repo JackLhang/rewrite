@@ -8,6 +8,7 @@
 //
 // 处理内容：
 //   i.video.qq.com        protobuf(tRPC) 响应：开屏/前贴/中插/信息流/我的页广告、底部 Tab
+//   i.video.qq.com        我的页入口：左上角游戏手柄图标、领VIP会员+流量
 //   i.video.qq.com        请求：拦截广告 RPC 调用
 //   iacc.qq.com           JCE 二进制响应：播放提示、贴片广告、暂停广告、青少年弹窗
 //   config.ab.qq.com      AB 配置：开启简洁模式、关闭 QUIC / 预解析
@@ -47,6 +48,10 @@
   const JCE_ROLL_ADS = [129278, 130273];
   // 暂停广告，body tag1.tag1 为包着广告单列表的 simple list
   const JCE_PAUSE_AD = 129196;
+  // 开屏广告的 RPC 方法名每个版本都可能变（GetSplashPreload / GetSplashRealtimePoll / 以后别的名字），
+  // 所以除了精确名单，再用关键词兜底：方法名里带 splash 的一律拦（splash 只用于开屏广告）。
+  const BLOCK_RE = /(^|[._/])splash/i;
+  function normFunc(f) { return String(f == null ? "" : f).replace(/^\/+/, ""); }
   const DROP = {};
 
   function utf8(s) {
@@ -437,6 +442,47 @@
     }
     return rebuild(b, s, e, fs, edits);
   }
+  // 「我的」页是 MVL 布局：一条 item 通常是「图标/标题 + 跳转链接 + eid/mod_id 元数据」。
+  // 想删掉某个入口，就整块删掉承载它的那条 item：节点里出现特征串 + 节点直接带跳转链接。
+  const UI_TOP = utf8("user_center_top_function");
+  const UI_KEYS = [
+    // { 特征串, 是否只在「我的」页顶部功能区出现时才生效 }
+    [utf8("iwan.qq.com/g/honor-center"), 1],   // 左上角游戏手柄图标（首页「爱玩」频道也有同域名，须限定）
+    [utf8("userCenter_weishiVIP0606_entry"), 0], // 领VIP会员+流量（任务入口）
+    [utf8("领VIP会员+流量"), 0]                   // 同名兜底（入口改 key 但标题没变时）
+  ];
+  function hasUiKey(b, s, e, top) {
+    for (let i = 0; i < UI_KEYS.length; i++) {
+      if (UI_KEYS[i][1] && !top) continue;
+      if (find(b, UI_KEYS[i][0], s, e) >= 0) return true;
+    }
+    return false;
+  }
+  function hasUrlChild(b, s, e) {
+    const fs = parse(b, s, e);
+    if (!fs) return false;
+    for (const x of fs) {
+      if (x.w !== 2 || x.e - x.vs < 10 || x.e - x.vs > 600) continue;
+      const v = x.vs;
+      if (b[v] === 0x68 && b[v + 1] === 0x74 && b[v + 2] === 0x74 && b[v + 3] === 0x70) return true; // http
+      if (b[v] === 0x74 && b[v + 1] === 0x78 && b[v + 2] === 0x76) return true;                      // txv
+    }
+    return false;
+  }
+  function dropUi(b, s, e, depth, top) {
+    if (depth > 16 || e - s < 120 || e - s > 262144 || !hasUiKey(b, s, e, top)) return null;
+    const fs = parse(b, s, e);
+    if (!fs) return null;
+    const edits = new Map();
+    for (const x of fs) {
+      if (x.w !== 2 || x.e - x.vs < 120) continue;
+      if (!hasUiKey(b, x.vs, x.e, top)) continue;
+      if (x.e - x.vs <= 1600 && hasUrlChild(b, x.vs, x.e)) { edits.set(x, DROP); L("我的页", "删除入口 " + (x.e - x.vs) + "B"); continue; }
+      const sub = dropUi(b, x.vs, x.e, depth + 1, top);
+      if (sub) edits.set(x, lenField(x.f, sub));
+    }
+    return rebuild(b, s, e, fs, edits);
+  }
   const PC_PAGE = utf8("personal_center_page"), AD_FEED = utf8("pb.AdFeed");
   function transform(b, s, e) {
     const top = parse(b, s, e);
@@ -461,6 +507,13 @@
         if (edits.size) return rebuild(b, s, e, top, edits);
       }
     }
+    const ui = dropUi(b, s, e, 0, find(b, UI_TOP, s, e) >= 0);
+    if (ui) {
+      indexMarkers(ui, 0, ui.length);
+      const c = clean(ui, 0, ui.length, 0);
+      L("我的页", "入口已删除 " + (e - s) + "→" + (c ? c.length : ui.length) + "B");
+      return c || ui;
+    }
     return clean(b, s, e, 0);
   }
   function trpcFrame(u8) {
@@ -477,7 +530,10 @@
     indexMarkers(u8, fr.he, u8.length);
     L("i.video", "tRPC 帧 OK：头 " + fr.he + "B / 体 " + (u8.length - fr.he) + "B");
     const body = transform(u8, fr.he, u8.length);
-    if (!body) { L("i.video", "解析完成，未命中广告元素，放行"); return null; }
+    if (!body) {
+      L("i.video", has(null, fr.he, u8.length) ? "包内有广告标记但没命中删除规则（可能是未覆盖的新结构）" : "解析完成，未命中广告元素，放行");
+      return null;
+    }
     const out = concat([u8.subarray(0, fr.he), body]);
     put32(out, 4, out.length);
     L("i.video", "清洗生效：" + u8.length + "→" + out.length + "B");
@@ -491,9 +547,12 @@
     const hd = parse(u8, fr.hs, fr.he), fn = hd && hd.find(x => x.f === 7 && x.w === 2);
     const func = fn ? ascii(u8, fn.vs, fn.e) : null;
     if (!func) { L("请求", "tRPC 帧里没有 func 字段，放行"); return null; }
-    if (BLOCK_FUNCS.indexOf(func) < 0) { L("请求", "RPC=" + func + " 不在拦截名单"); return null; }
-    L("请求", "RPC=" + func + " 命中，改写广告位");
-    const nb = utf8(func.slice(func.lastIndexOf("/") + 1)), out = u8.slice();
+    const nf = normFunc(func);
+    const hitList = BLOCK_FUNCS.some(x => normFunc(x) === nf);
+    const hitRe = BLOCK_RE.test(nf);
+    if (!hitList && !hitRe) { L("请求", "RPC=" + nf + " 不在拦截名单"); return null; }
+    L("请求", "RPC=" + nf + " 命中（" + (hitList ? "精确名单" : "splash 关键词") + "），改写方法名");
+    const nb = utf8(nf.slice(nf.lastIndexOf("/") + 1)), out = u8.slice();
     for (let p = fr.hs; (p = find(out, nb, p, fr.he)) >= 0; p += nb.length) out[p] = out[p] === 0x58 ? 0x59 : 0x58;
     return gz ? gzip(out) : out;
   }
