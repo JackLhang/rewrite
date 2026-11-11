@@ -396,6 +396,16 @@
     if (f6 && FEED_MODULE_TAGS.indexOf(ascii(b, f6.vs, f6.e)) >= 0 && has("AdFeedInfo", x.vs, x.e) && adOnlyAtPath(b, kids)) return true;
     return false;
   }
+  // 20 位十进制版本号 +1（不用 BigInt，老 JSC 也能跑）
+  function incDec(s) {
+    const a = s.split("");
+    for (let i = a.length - 1; i >= 0; i--) {
+      if (a[i] === "9") { a[i] = "0"; continue; }
+      a[i] = String.fromCharCode(a[i].charCodeAt(0) + 1);
+      return a.join("");
+    }
+    return s;
+  }
   function tabFix(b, x) {
     if (anyName(b, x.vs, x.e) !== "GetTabListRsp") return null;
     const rest = parse(b, ANYV, x.e);
@@ -431,11 +441,15 @@
     // 顺手把导航数据版本（f4，20 位数字）改掉：客户端拿它和本地缓存比对，
     // 版本不变就可能继续用缓存里的旧 Tab 列表，改了才会重新应用。
     const ver = vf.find(r => r.f === 4 && r.w === 2 && r.e - r.vs === 20);
-    if (ver && /^[0-9]{20}$/.test(ascii(b, ver.vs, ver.e) || "")) {
-      edits.set(ver, lenField(4, utf8(("1" + String(Date.now()) + "000000").slice(0, 20))));
+    let verTxt = "";
+    if (ver) verTxt = ascii(b, ver.vs, ver.e) || "";
+    if (ver && /^[0-9]{20}$/.test(verTxt)) {
+      // 必须比原版本号「大」，客户端才认为是新数据；直接 +1 最稳（换成时间戳可能反而变小）
+      const nv2 = incDec(verTxt);
+      if (nv2 !== verTxt) edits.set(ver, lenField(4, utf8(nv2)));
     }
     const nv = rebuild(b, v.vs, v.e, vf, edits);
-    L("Tab", "删除 " + drop.size + " 个，剩 " + (items.length - drop.size) + " 个" + (ver ? "，已换版本号" : ""));
+    L("Tab", "删除 " + drop.size + " 个，剩 " + (items.length - drop.size) + " 个" + (verTxt ? "，版本 " + verTxt + "→" + incDec(verTxt) : ""));
     return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nv), b.subarray(v.e, x.e)]));
   }
   function clean(b, s, e, depth) {
