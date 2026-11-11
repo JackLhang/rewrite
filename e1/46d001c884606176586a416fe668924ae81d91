@@ -1,0 +1,22 @@
+Loon/QQLiveClean.lpx
+  h_ae199c2e021e7b 1-4,7-21,24-26,29-38,41
+script/QQLiveCleanNew.js
+  h_ae199c2e021e7b 26,51-57,386,431-436,438,676-707,774
+script/QQLiveClean.js
+  h_ae199c2e021e7b 2-15,18-43,45-101,105-147,149-253,255-294,299-389,391-407,410-438,440-457,461-468,472-500,502-508,510-535,537-630,633-644,646-722,725-735,737-752,754-846,850-855,859-871,873-899,901-907,910-920,922-941,944-945,947-952,954-969,972-982,985-1003
+  h_ae199c2e021e7b 297,848,857
+Loon/QQLiveCleanNew.lpx
+  h_ae199c2e021e7b 11
+  h_ae199c2e021e7b 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e146d001c884606176586a416fe668924ae81d91",
+  "prompts": {},
+  "humans": {
+    "h_ae199c2e021e7b": {
+      "author": "LQAD\\hlliu1 <hlliu1@leqee.com>"
+    }
+  }
+}
