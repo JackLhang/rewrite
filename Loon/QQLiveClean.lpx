@@ -1,76 +1,41 @@
-#!name=腾讯视频去广告+界面精简（Loon v3 测试版真机标准校订）
-#!desc=针对 iOS 腾讯视频最新版真机抓包校订（仅适用于 Loon 支持 V3 表达式的最新测试版）。移除了已废弃的 force-http-engine-hosts。引入全局 UDP-443 拦截强制 QUIC 降级，保障 MitM 100% 命中。需信任 Loon 证书并开启 MITM。
-#!author=RuCu6 + 9.x 适配 / v3 抓包校订版
-#!icon=https://githubusercontent.com
-#!category=BetaPlugin
-#!openUrl=https://apple.com
+#!name=腾讯视频去广告+精简
+#!author=Agentic Builder
+#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Tencent_Video.png
+#!openUrl=https://apps.apple.com/app/id458318329
 #!tag=去广告
 #!system=ios
-#!loon_version=3.3.0
-#!homepage=https://hub.kelee.one
-#!date=2026-09-17 17:29:00
+#!version=1.0.1
+#!date=2026-09-08
+#!desc=去开屏广告、视频前贴/中插广告、暂停广告，去掉底部多余 Tab 与「我的」页广告，并开启简洁模式
+#!author=TG@ZenMoFiShi（Loon 移植）
+#!date=2026-10-29 15:30:00
+
+# ── 使用说明 ─────────────────────────────────────────────
+# 1. 脚本 txvideo-ad-clean.js 与本插件放在同一目录（同一仓库）即可，Loon 会按插件地址解析相对路径。
+# 2. 若提示脚本下载失败，把 script-path 改成可访问的完整地址，例如：
+# script-path=https://raw.githubusercontent.com/用户名/仓库名/main/txvideo-ad-clean.js
+# 3. 需要开启 Loon 的「MitM」与「脚本」总开关，并安装/信任证书，否则不会生效。
+# ────────────────────────────────────────────────────────
+
+[Argument]
+diag = switch,true,tag=诊断日志,desc=打开后在 Loon 日志里输出 txvideo-ad-clean 流水（排查用）
 
 [Rule]
-# —— QUIC 强杀兜底：Loon 在常规域名规则下无法精准捕捉 UDP 初始握手包的 SNI。
-# 必须使用全局 UDP 443 REJECT-DROP，强制腾讯视频降级回 TCP 走 MitM，否则去广告脚本全盘失效。
-AND,((PROTOCOL,UDP),(DEST-PORT,443)),REJECT-DROP
-AND,((PROTOCOL,QUIC),(DOMAIN-SUFFIX,://qq.com)),REJECT-DROP
-
-# —— 开屏
-DOMAIN,://qq.com,REJECT
-
-# —— 广告 SDK / 归因 / 变现域名拦截
-DOMAIN,://gdtimg.com,REJECT
-DOMAIN,pgdt.gtimg.cn,REJECT
-DOMAIN-SUFFIX,://qq.com,REJECT
-DOMAIN-SUFFIX,://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN,playproxy.://qq.com,REJECT
-DOMAIN,richmedia.://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-
-# —— 埋点 / 遥测 / 设备注册拦截
-DOMAIN,://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN,info4.://qq.com,REJECT
-DOMAIN,info6.://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-DOMAIN-KEYWORD,://qq.com,REJECT
-DOMAIN-KEYWORD,trace.://qq.com,REJECT
-IP-CIDR,47.110.187.87/32,REJECT,no-resolve
-
-# —— 好物商城与游戏精简组件过滤
-URL-REGEX,^https?://vfiles\.gtimg\.cn/tvideo/script/vmall/.*,REJECT
-URL-REGEX,^https?://pbaccess\.video\.qq\.com/trpc\.video_ec_promotion\.vmall_subscribe\..*,REJECT
-DOMAIN,mall.://qq.com,REJECT
-DOMAIN,://qq.com,REJECT
-
-# —— 小游戏预加载
-URL-REGEX,^https?://i(wan)?\.video\.qq\.com/trpc\.vgopen\.mini_game_detail\..*,REJECT
-
-# —— 旧版 http:// 广告链兼容
-URL-REGEX,^http://[0-9\.:]+/?(defaultts\.tc|vmind\.qqvideo\.tc|finderpdd\.video)\.qq\.com/.*,REJECT
-URL-REGEX,^http://apd-vlive\.apdcdn\.tc\.qq\.com/vmind\.qqvideo\.tc\.qq\.com/.*,REJECT
-URL-REGEX,^http://apd-[a-z0-9]+\.v\.smtcdns\.com/(defaultts|omts|vmind\.qqvideo)\.tc\.qq\.com/.*,REJECT
-
-[Rewrite]
-# 利用最先进的测试版条件判断语法，将广告接口拉回本地直接丢弃，不执行 JS
-request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(diff|get)vmind/i then reject_dict(200)
-request if ${url} ~= /^https?:\/\/i(wan)?\.video\.qq\.com\/trpc\.vgopen\.mini_game_detail\.MiniGameDetail\/GetPreloadGames/i then reject_dict(200)
+# 广告上报/统计域名，直接拒绝
+DOMAIN,iacc.stgw.qq.com,REJECT
+DOMAIN,tacc.video.qq.com,REJECT
 
 [Script]
-# 标准的 V3 测试版条件分支脚本声明。注意：三处 script-path 可以替换为您自己本地同步的 JS 路径（如 txvideo.js）以防 paste.rs 过期。
-request if ${url} ~= /^https?:\/\/vv6?\.video\.qq\.com\/(getvinfo|batchvinfo)/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="腾讯视频-去贴片试看", timeout=15, requires_body=true, binary_body_mode=true
-request if ${url} ~= /^https?:\/\/(i\.video|iwan\.video)\.qq\.com\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="腾讯视频-广告接口", timeout=15, requires_body=true, binary_body_mode=true
-response if ${url} ~= /^https?:\/\/(i\.video|iwan\.video)\.qq\.com\//i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveClean.js") with tag="腾讯视频-响应精简", timeout=20, requires_body=true, binary_body_mode=true
+# i.video.qq.com 请求侧：拦截开屏、贴片、信息流等广告 RPC
+request if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag}}) with tag="腾讯视频-广告请求", timeout=60, binary_body_mode=true,requires_body=true,
+# i.video.qq.com 响应侧：清理 protobuf(tRPC) 内的广告元素与多余 Tab
+response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag}}) with tag="腾讯视频-播放页", timeout=60, binary_body_mode=true,requires_body=true
+# iacc.qq.com：JCE 二进制，处理播放提示、贴片广告、暂停广告、青少年弹窗
+response if ${url} ~= /^https?:\/\/iacc\.qq\.com\/(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag}}) with tag="腾讯视频-JCE", timeout=60, binary_body_mode=true,requires_body=true
+# config.ab.qq.com：AB 配置，开启简洁模式、关闭 QUIC 与预解析
+response if ${url} ~= /^https?:\/\/config\.ab\.qq\.com\/tab\/GetTabRemoteConfig(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag}}) with tag="腾讯视频-AB配置", timeout=60, binary_body_mode=true, requires_body=true
+# rdelivery.qq.com：关闭 tab_gray 灰度
+response if ${url} ~= /^https:\/\/rdelivery\.qq\.com\/v1\/sdkconfig\/get(?:\?.*)?$/i then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag}}) with tag="腾讯视频-灰度", timeout=60, binary_body_mode=true, requires_body=true
 
 [MITM]
-hostname = vv.://qq.com, vv6.://qq.com, i.://qq.com, iwan.://qq.com
+hostname = i.video.qq.com, iacc.qq.com, config.ab.qq.com, rdelivery.qq.com

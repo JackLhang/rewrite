@@ -23,7 +23,7 @@
   const DROP_MODULES = ["user_center_more_function"];
   const AD_MODULE_IDS = ["outerPaster"];
   const FEED_MODULE_TAGS = ["waterfall_feeds_module_mergeid"];
-  const MARKERS = ["AdFeedInfo", "AdResponseInfo", "InnerAd", "LoadingConfig", "PreloadResourceInfo", "GetTabListRsp", "_ad", "teenager_popup_ctrl"].concat(DROP_MODULES);
+  const MARKERS = ["AdFeedInfo", "AdResponseInfo", "InnerAd", "LoadingConfig", "PreloadResourceInfo", "GetTabListRsp", "_ad", "teenager_popup_ctrl", "SplashAd", "splash_ad"].concat(DROP_MODULES);
   const BLOCK_FUNCS = [
     "/trpc.business_splash.ad_ssp_splash.splashService/GetSplashPreload",
     "/trpc.business_splash.ad_ssp_splash.splashService/GetSplashRealtimePoll",
@@ -48,6 +48,13 @@
   const JCE_ROLL_ADS = [129278, 130273];
   // 暂停广告，body tag1.tag1 为包着广告单列表的 simple list
   const JCE_PAUSE_AD = 129196;
+  // 广告 SDK 配置（gzip 内是整份广告配置 JSON，含 splashConfig.splashAdClose 等开关）
+  const JCE_AD_SDK_CONFIG = 129513;
+  // 在配置 JSON 里做同长度替换：false→true+空格 / true→false+空格，长度不变，JSON 依然合法
+  const SDK_PATCHES = [
+    ['"splashAdClose":false', '"splashAdClose":true '],                       // 开屏广告总开关
+    ['"enableHotLaunchSplashAd":true', '"enableHotLaunchSplashAd":false  ']    // 热启动（切回前台）开屏
+  ];
   // 开屏广告的 RPC 方法名每个版本都可能变（GetSplashPreload / GetSplashRealtimePoll / 以后别的名字），
   // 所以除了精确名单，再用关键词兜底：方法名里带 splash 的一律拦（splash 只用于开屏广告）。
   const BLOCK_RE = /(^|[._/])splash/i;
@@ -376,6 +383,7 @@
       if (k.f === 10 && has("AdFeedInfo", k.vs, k.e) && wrapsAny(b, k)) return true;
       const t = anyName(b, k.vs, k.e);
       if (t && AD_ANY.indexOf(t) >= 0) return true;
+      if (t && /Splash/i.test(t)) return true;   // 开屏类 Any（如 SplashAdInfo / SplashInfo）一律整块删
     }
     const f1 = kids.find(k => k.f === 1 && k.w === 2), f2 = kids.find(k => k.f === 2 && k.w === 2);
     if (f1 && f2 && f2.e - f2.vs > 3 && f2.e - f2.vs < 64) {
@@ -420,7 +428,14 @@
       edits.set(it, lenField(1, concat(parts)));
       idx++;
     }
+    // 顺手把导航数据版本（f4，20 位数字）改掉：客户端拿它和本地缓存比对，
+    // 版本不变就可能继续用缓存里的旧 Tab 列表，改了才会重新应用。
+    const ver = vf.find(r => r.f === 4 && r.w === 2 && r.e - r.vs === 20);
+    if (ver && /^[0-9]{20}$/.test(ascii(b, ver.vs, ver.e) || "")) {
+      edits.set(ver, lenField(4, utf8(("1" + String(Date.now()) + "000000").slice(0, 20))));
+    }
     const nv = rebuild(b, v.vs, v.e, vf, edits);
+    L("Tab", "删除 " + drop.size + " 个，剩 " + (items.length - drop.size) + " 个" + (ver ? "，已换版本号" : ""));
     return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nv), b.subarray(v.e, x.e)]));
   }
   function clean(b, s, e, depth) {
@@ -658,6 +673,38 @@
     parts.push(b.subarray(last, e));
     return concat(parts);
   }
+  // 广告 SDK 配置：gzip 内是整份广告配置 JSON（splashConfig.splashAdClose 等开关）。
+  // JSON 前面紧挨着一个 4 字节大端长度；改完内容要同步这个长度，
+  // 外层 JCE 的长度由 onJce 统一重算，所以这里只管这一段。
+  function fixAdSdkConfig(b, s, e) {
+    const js = find(b, utf8('{"appConfig"'), s, e);
+    if (js < 4) { L("iacc", "广告 SDK 配置：没找到配置 JSON"); return null; }
+    const oldLen = u32(b, js - 4);
+    if (oldLen <= 0 || js + oldLen > e) { L("iacc", "广告 SDK 配置：JSON 长度不符（" + oldLen + "）"); return null; }
+    const json = b.subarray(js, js + oldLen);
+    const jobs = [];
+    for (const [from, to] of SDK_PATCHES) {
+      const f = utf8(from);
+      let i = 0;
+      while (i < json.length) {
+        const p = find(json, f, i, json.length);
+        if (p < 0) break;
+        jobs.push([p, f.length, utf8(to)]);
+        i = p + f.length;
+      }
+    }
+    if (!jobs.length) { L("iacc", "广告 SDK 配置：开关已是关闭状态"); return null; }
+    jobs.sort((a, c) => a[0] - c[0]);
+    const parts = [];
+    let cur = 0;
+    for (const [p, fl, t] of jobs) { parts.push(json.subarray(cur, p), t); cur = p + fl; }
+    parts.push(json.subarray(cur));
+    const nj = concat(parts);
+    const lb = new Uint8Array(4);
+    put32(lb, 0, nj.length);
+    L("iacc", "广告 SDK 配置：关闭开屏开关 " + jobs.length + " 处，JSON " + oldLen + "→" + nj.length + "B");
+    return concat([b.subarray(s, js - 4), lb, nj, b.subarray(js + oldLen, e)]);
+  }
   function fixTeenConfig(b, s, e) {
     const fs = jFields(b, s, e);
     const code = fs.find(x => x.tag === 9);
@@ -724,7 +771,7 @@
     }
     const cmd = (b[8] << 16) | (b[9] << 8) | b[10];
     L("iacc", "JCE cmd=" + cmd + " len=" + n);
-    const fix = cmd === JCE_TEEN_CONFIG ? fixTeenConfig : cmd === JCE_PLAY_TIPS ? fixPlayTips : JCE_ROLL_ADS.indexOf(cmd) >= 0 ? fixRollAds : cmd === JCE_PAUSE_AD ? fixPauseAd : null;
+    const fix = cmd === JCE_TEEN_CONFIG ? fixTeenConfig : cmd === JCE_PLAY_TIPS ? fixPlayTips : cmd === JCE_AD_SDK_CONFIG ? fixAdSdkConfig : JCE_ROLL_ADS.indexOf(cmd) >= 0 ? fixRollAds : cmd === JCE_PAUSE_AD ? fixPauseAd : null;
     if (!fix) { L("iacc", "cmd=" + cmd + " 不在处理列表"); return null; }
     const gz = find(b, new Uint8Array([0x1f, 0x8b, 0x08]), 60, Math.min(n, 140));
     if (gz < 4) { L("iacc", "cmd=" + cmd + " 找不到内层 gzip 流"); return null; }
