@@ -16,9 +16,13 @@
 // ============================================================
 
 (() => {
-  const TAB_DROP_KEYS = ["smallvideo_entrance", "goods_entrance"];
-  const TAB_DROP_TITLES = ["短剧", "好物"];
-  const TAB_CUT_WHITELIST = "0;2;4";
+  // 底部 Tab 删除：两套方案，插件页 [Argument] 的 tabmode 选（a/b），tabs 是总开关
+  //   a = 删「短剧」「好物」，留 首页/会员专区/我的（客户端 AB 白名单 0;2;4）
+  //   b = 删「VIP会员」「好物」，留 首页/短视频/我的（客户端 AB 白名单 0;1;4）
+  const TAB_PLANS = {
+    a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "好物"], cut: "0;2;4" },
+    b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "好物"], cut: "0;1;4" }
+  };
   const AD_ANY = ["AdResponseInfo", "InnerAdPromotionEventList", "InnerAdCommonPromotionEventActivityList", "LoadingConfig", "PreloadResourceInfo", "AdFeedInfo"];
   const DROP_MODULES = ["user_center_more_function"];
   const AD_MODULE_IDS = ["outerPaster"];
@@ -408,6 +412,7 @@
   }
   function tabFix(b, x) {
     if (anyName(b, x.vs, x.e) !== "GetTabListRsp") return null;
+    if (!TAB_ON) { L("Tab", "开关已关闭，导航响应原样放行"); return null; }
     const rest = parse(b, ANYV, x.e);
     const v = rest && rest.find(r => r.f === 2 && r.w === 2);
     if (!v) return null;
@@ -425,7 +430,7 @@
           if (k1) key = ascii(b, k1.vs, k1.e) || "";
         }
       }
-      if (TAB_DROP_KEYS.indexOf(key) >= 0 || TAB_DROP_TITLES.indexOf(title) >= 0) drop.add(it);
+      if (TAB_PLAN.keys.indexOf(key) >= 0 || TAB_PLAN.titles.indexOf(title) >= 0) drop.add(it);
     }
     if (!drop.size) return null;
     const edits = new Map();
@@ -449,7 +454,7 @@
       if (nv2 !== verTxt) edits.set(ver, lenField(4, utf8(nv2)));
     }
     const nv = rebuild(b, v.vs, v.e, vf, edits);
-    L("Tab", "删除 " + drop.size + " 个，剩 " + (items.length - drop.size) + " 个" + (verTxt ? "，版本 " + verTxt + "→" + incDec(verTxt) : ""));
+    L("Tab", "方案 " + TAB_PLAN.desc + "：删除 " + drop.size + " 个，剩 " + (items.length - drop.size) + " 个" + (verTxt ? "，版本 " + verTxt + "→" + incDec(verTxt) : ""));
     return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nv), b.subarray(v.e, x.e)]));
   }
   function clean(b, s, e, depth) {
@@ -817,18 +822,19 @@
     let o;
     try { o = JSON.parse(js); } catch (x) { return null; }
     if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+    if (!TAB_ON) return null;
     const fc = o.feature_config && typeof o.feature_config === "object" ? o.feature_config : {};
-    if (o.enable === 1 && fc.enable === 1 && fc.tab_bar_cut_enable === 1 && fc.tab_bar_cut_whitelist === TAB_CUT_WHITELIST) return null;
+    if (o.enable === 1 && fc.enable === 1 && fc.tab_bar_cut_enable === 1 && fc.tab_bar_cut_whitelist === TAB_PLAN.cut) return null;
     fc.enable = 1;
     fc.tab_bar_cut_enable = 1;
-    fc.tab_bar_cut_whitelist = TAB_CUT_WHITELIST;
+    fc.tab_bar_cut_whitelist = TAB_PLAN.cut;
     o.enable = 1;
     o.feature_config = fc;
     return JSON.stringify(o);
   }
 
   function simpleModeJson() {
-    return JSON.stringify({ enable: 1, launch_config: { enable: 1, delay_create_tab_enable: 1, delay_create_tab_whitelist: "" }, feature_config: { enable: 1, tab_bar_cut_enable: 1, tab_bar_cut_whitelist: TAB_CUT_WHITELIST } });
+    return JSON.stringify({ enable: 1, launch_config: { enable: 1, delay_create_tab_enable: 1, delay_create_tab_whitelist: "" }, feature_config: { enable: 1, tab_bar_cut_enable: 1, tab_bar_cut_whitelist: TAB_PLAN.cut } });
   }
   function simpleModeEntry() {
     const v = concat([lenField(1, utf8(simpleModeJson())), ev(16), ev(11276), lenField(4, utf8(SIMPLE_KEY))]);
@@ -881,7 +887,7 @@
       edits.set(x, lenField(3, rebuild(u8, x.vs, x.e, ef, em)));
     }
     let out = rebuild(u8, 0, u8.length, top, edits);
-    if (!out && !found && top.some(x => x.f === 1 && x.w === 0 && x.v === 100) && top.some(x => x.f === 3 && x.w === 2)) out = concat([u8, lenField(3, simpleModeEntry())]);
+    if (!out && TAB_ON && !found && top.some(x => x.f === 1 && x.w === 0 && x.v === 100) && top.some(x => x.f === 3 && x.w === 2)) out = concat([u8, lenField(3, simpleModeEntry())]);
     if (!out) { L("AB", "没有可补丁的 simple_mode 条目，放行"); return null; }
     L("AB", "已补丁 " + edits.size + " 处，" + u8.length + "→" + out.length + "B");
     return gz ? gzip(out) : out;
@@ -896,6 +902,32 @@
   //   · 新版语法：script("...", {${diag}}) → $argument = {diag:true/false}
   //   · 旧版语法：argument="diag=true"      → $argument 是字符串
   //   · 都没有：用 DBG_DEFAULT
+  // ── 插件 [Argument] 通用读取 ────────────────────────────────
+  // 新版语法 script("x.js",{${a},${b}}) → $argument 是对象；旧版 argument="a=true&b=x" → 字符串
+  function argRaw(a, names) {
+    if (a === undefined || a === null) return null;
+    if (typeof a === "object") {
+      for (let i = 0; i < names.length; i++)
+        if (typeof a[names[i]] !== "undefined") return a[names[i]];
+      return null;
+    }
+    if (typeof a === "string") {
+      const re = new RegExp("(?:^|[&\\s,{;])(?:" + names.join("|") + ")\\s*[=:]\\s*([^&\\s,;}]+)", "i");
+      const m = a.match(re);
+      return m ? m[1].trim() : null;
+    }
+    return null;
+  }
+  function argBool(a, names, def) {
+    let v = argRaw(a, names);
+    if (v === null) return def;
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") return v !== 0;
+    v = String(v).trim();
+    if (/^(1|true|on|yes|y)$/i.test(v)) return true;
+    if (/^(0|false|off|no|n)$/i.test(v)) return false;
+    return def;
+  }
   const DBG_DEFAULT = true;
   function argFlag(a) {
     if (a === undefined || a === null) return null;
@@ -922,6 +954,21 @@
     try { if (typeof $argument !== "undefined") a = $argument; } catch (e) { a = null; }
     const v = argFlag(a);
     return v === null ? DBG_DEFAULT : v;
+  })();
+  // ── 底部 Tab 删除开关（插件页可改，不用动代码）──────────────
+  //   tabs=true/false       是否删除底部多余 Tab（false = 导航响应一字节不改）
+  //   tabmode=a/b           删哪一组：a=删短剧+好物，b=删VIP会员+好物
+  let TAB_ON = true, TAB_PLAN = TAB_PLANS.a;
+  (function () {
+    let a = null;
+    try { if (typeof $argument !== "undefined") a = $argument; } catch (e) { a = null; }
+    TAB_ON = argBool(a, ["tabs", "tab", "tabcut", "tabclean"], true);
+    let m = argRaw(a, ["tabmode", "tabplan", "tabset"]);
+    m = m === null ? "" : String(m).trim().toLowerCase();
+    if (m === "b" || m === "vip" || m === "2") TAB_PLAN = TAB_PLANS.b;
+    else if (m === "a" || m === "short" || m === "smallvideo" || m === "1") TAB_PLAN = TAB_PLANS.a;
+    else if (m) L("参数", "tabmode=" + m + " 无法识别，改看 tabvip 开关");
+    else if (argBool(a, ["tabvip", "tabb"], false)) TAB_PLAN = TAB_PLANS.b;
   })();
   let RID = "?", STAGE = "初始化";
   function L(stage, msg) {
