@@ -11,17 +11,30 @@
 //   i.video.qq.com        我的页入口：左上角游戏手柄图标、领VIP会员+流量
 //   i.video.qq.com        请求：拦截广告 RPC 调用
 //   iacc.qq.com           JCE 二进制响应：播放提示、贴片广告、暂停广告、青少年弹窗
-//   config.ab.qq.com      AB 配置：开启简洁模式、关闭 QUIC / 预解析
-//   rdelivery.qq.com      SDK 灰度：关闭 tab_gray
+//
+// v1.0.4（2026-11-12）修复「底部 Tab 删不掉」：
+//   1) 根因是延迟，不是删除逻辑：抓包里脚本已经把 GetTabListRsp 从 5 项改成 3 项，
+//      但这笔 getNaviPage 是请求发出 14.4s 后才回写（请求侧排队 8.8s + 响应侧 5.3s），
+//      而客户端 3s 就放弃了这笔请求（日志里 23125 那条 3.1s 后直接 dealloc），
+//      于是 App 一直用本地默认的 5 个 Tab，改好的响应被丢掉。
+//      延迟来源：脚本每次求值都要重新下载（gh-proxy 的 cache-control 只有 60s），
+//      冷启动一轮 ~150 次求值串行排队；实测 Start evaluate → 脚本首行 中位数 3.3s、最长 12.8s。
+//      → 脚本地址换成自带 7 天缓存的 jsdelivr，超时 60s→8s，删掉两条无用规则。
+//   2) 版本号（f4）改成持久化递增：原来每次只 +1，客户端缓存里已经是 +1 后的值，
+//      下次再收到同样的值就判定「没更新」，永远沿用旧 Tab。
+//   3) 删掉 config.ab.qq.com / rdelivery.qq.com 两条规则：9.04.80 的
+//      GetTabRemoteConfig 返回的是打点 AB 采样配置（带 check_sum），里面没有
+//      simple_mode_config，塞条目删不掉 Tab，还有弄坏打点配置的风险。
 // ============================================================
 
 (() => {
-  // 底部 Tab 删除：两套方案，插件页 [Argument] 的 tabmode 选（a/b），tabs 是总开关
-  //   a = 删「短剧」「好物」，留 首页/会员专区/我的（客户端 AB 白名单 0;2;4）
-  //   b = 删「VIP会员」「好物」，留 首页/短视频/我的（客户端 AB 白名单 0;1;4）
+  // 底部 Tab 删除：两套方案，插件页 [Argument] 的 tabvip 开关切换
+  //   a（tabvip=关，默认）= 删「短剧/短视频」「好物」，留 首页 / 会员专区 / 我的
+  //   b（tabvip=开）       = 删「会员专区/VIP会员」「好物」，留 首页 / 短视频 / 我的
+  // 判断方式：既看 f22 的埋点 key（*_entrance），也看 f3 标题，任一命中就删。
   const TAB_PLANS = {
-    a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "好物"], cut: "0;2;4" },
-    b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "好物"], cut: "0;1;4" }
+    a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "短视频", "好物"] },
+    b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "VIP会员", "好物"] }
   };
   const AD_ANY = ["AdResponseInfo", "InnerAdPromotionEventList", "InnerAdCommonPromotionEventActivityList", "LoadingConfig", "PreloadResourceInfo", "AdFeedInfo"];
   const DROP_MODULES = ["user_center_more_function"];
@@ -400,25 +413,21 @@
     if (f6 && FEED_MODULE_TAGS.indexOf(ascii(b, f6.vs, f6.e)) >= 0 && has("AdFeedInfo", x.vs, x.e) && adOnlyAtPath(b, kids)) return true;
     return false;
   }
-  // 20 位十进制版本号 +1（不用 BigInt，老 JSC 也能跑）
-  function incDec(s) {
-    const a = s.split("");
-    for (let i = a.length - 1; i >= 0; i--) {
-      if (a[i] === "9") { a[i] = "0"; continue; }
-      a[i] = String.fromCharCode(a[i].charCodeAt(0) + 1);
-      return a.join("");
-    }
-    return s;
-  }
+  // ── 底部 Tab ────────────────────────────────────────────────
+  // 客户端这笔请求是 MVLNavigationService/getNaviPage(page_id=bottom)，
+  // 响应体里 type=...GetTabListRsp 的 f1 列表就是底部导航每一项：
+  //   f1 = tab id（0 首页 / 1 短视频 / 2 会员专区 / 21 好物 / 4 个人中心）
+  //   f2 = 顺序号，f3 = 标题，f22 = 埋点 key（*_entrance）
+  // 做法：删掉不需要的项，把留下的顺序号原地改连续，其余字段（图标/角标/埋点）原样保留。
   function tabFix(b, x) {
     if (anyName(b, x.vs, x.e) !== "GetTabListRsp") return null;
-    if (!TAB_ON) { L("Tab", "开关已关闭，导航响应原样放行"); return null; }
+    if (!TAB_ON) { L("Tab", "开关已关闭，导航响应一字节不改"); return null; }
     const rest = parse(b, ANYV, x.e);
     const v = rest && rest.find(r => r.f === 2 && r.w === 2);
     if (!v) return null;
     const vf = parse(b, v.vs, v.e);
     if (!vf) return null;
-    const items = vf.filter(r => r.f === 1 && r.w === 2), drop = new Set();
+    const items = vf.filter(r => r.f === 1 && r.w === 2), drop = new Set(), names = [];
     for (const it of items) {
       const ik = parse(b, it.vs, it.e);
       if (!ik) return null;
@@ -430,32 +439,76 @@
           if (k1) key = ascii(b, k1.vs, k1.e) || "";
         }
       }
+      names.push(title || key || "?");
       if (TAB_PLAN.keys.indexOf(key) >= 0 || TAB_PLAN.titles.indexOf(title) >= 0) drop.add(it);
     }
-    if (!drop.size) return null;
-    const edits = new Map();
+    if (!drop.size) { L("Tab", "没匹配到要删的项，当前是：" + names.join(" / ")); return null; }
+    const edits = new Map(), kept = [];
     let idx = 0;
-    for (const it of items) {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
       if (drop.has(it)) { edits.set(it, DROP); continue; }
-      const ik = parse(b, it.vs, it.e), parts = [];
-      if (idx > 0) parts.push(ev(16), ev(idx));
-      for (const r of ik) if (!(r.f === 2 && r.w === 0)) parts.push(b.subarray(r.s, r.e));
-      edits.set(it, lenField(1, concat(parts)));
+      kept.push(names[i]);
+      const ik = parse(b, it.vs, it.e), ie = new Map();
+      let hasIdx = false;
+      for (const r of ik) {
+        // 顺序号原地替换：字段顺序和原始字节布局保持一致，少一种被客户端判错的写法
+        if (r.f === 2 && r.w === 0) { hasIdx = true; ie.set(r, concat([ev(16), ev(idx)])); }
+      }
+      // 首项的顺序号 0 在原包里本来就不写，这里也不额外补，尽量少改动字节
+      const body2 = hasIdx ? rebuild(b, it.vs, it.e, ik, ie)
+        : (idx > 0 ? concat([ev(16), ev(idx), b.subarray(it.vs, it.e)]) : b.subarray(it.vs, it.e));
+      edits.set(it, lenField(1, body2));
       idx++;
     }
-    // 顺手把导航数据版本（f4，20 位数字）改掉：客户端拿它和本地缓存比对，
-    // 版本不变就可能继续用缓存里的旧 Tab 列表，改了才会重新应用。
-    const ver = vf.find(r => r.f === 4 && r.w === 2 && r.e - r.vs === 20);
-    let verTxt = "";
-    if (ver) verTxt = ascii(b, ver.vs, ver.e) || "";
-    if (ver && /^[0-9]{20}$/.test(verTxt)) {
-      // 必须比原版本号「大」，客户端才认为是新数据；直接 +1 最稳（换成时间戳可能反而变小）
-      const nv2 = incDec(verTxt);
-      if (nv2 !== verTxt) edits.set(ver, lenField(4, utf8(nv2)));
+    // 版本号（f4，20 位十进制）：一定要严格变大，客户端才会丢掉本地缓存重新应用
+    const ver = vf.find(r => r.f === 4 && r.w === 2 && /^[0-9]{1,20}$/.test(ascii(b, r.vs, r.e) || ""));
+    let verTxt = "", newVer = "";
+    if (ver) {
+      verTxt = ascii(b, ver.vs, ver.e) || "";
+      newVer = nextVer(verTxt);
+      edits.set(ver, lenField(4, utf8(newVer)));
     }
     const nv = rebuild(b, v.vs, v.e, vf, edits);
-    L("Tab", "方案 " + TAB_PLAN.desc + "：删除 " + drop.size + " 个，剩 " + (items.length - drop.size) + " 个" + (verTxt ? "，版本 " + verTxt + "→" + incDec(verTxt) : ""));
+    L("Tab", "方案 " + TAB_PLAN.desc + "：删 " + drop.size + " 个，留 " + kept.join(" / ") + (verTxt ? "，版本 " + verTxt + "→" + newVer : ""));
     return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nv), b.subarray(v.e, x.e)]));
+  }
+  // ── 导航数据版本号 ─────────────────────────────────────────
+  // 老写法是每次 +1。但服务端每次下发的原值是固定的，客户端却把 +1 之后的值
+  // 存进了本地缓存，于是下一次再收到同样的 +1 就判成「没更新」，永远用旧 Tab。
+  // 这里改成持久化计数器：无论服务端给什么，永远给出比上次更大的值。
+  const VER_TAG = "txvideo_tabver";
+  function bigAdd(s, n) {
+    const a = s.split("");
+    let i = a.length - 1, carry = n;
+    while (i >= 0 && carry > 0) {
+      const v = (a[i].charCodeAt(0) - 48) + carry;
+      a[i] = String.fromCharCode(48 + (v % 10));
+      carry = Math.floor(v / 10);
+      i--;
+    }
+    return ((carry > 0 ? String(carry) : "") + a.join("")).replace(/^0+(?=.)/, "");
+  }
+  function bigCmp(x, y) {
+    if (x.length !== y.length) return x.length < y.length ? -1 : 1;
+    return x === y ? 0 : (x < y ? -1 : 1);
+  }
+  function kvGet(k) {
+    try { if (typeof $persistentStore !== "undefined" && $persistentStore.read) return $persistentStore.read(k); } catch (e) {}
+    try { if (typeof $prefs !== "undefined" && $prefs.valueForKey) return $prefs.valueForKey(k); } catch (e) {}
+    return null;
+  }
+  function kvSet(k, v) {
+    try { if (typeof $persistentStore !== "undefined" && $persistentStore.write) { $persistentStore.write(v, k); return; } } catch (e) {}
+    try { if (typeof $prefs !== "undefined" && $prefs.setValueForKey) { $prefs.setValueForKey(v, k); return; } } catch (e) {}
+  }
+  function nextVer(orig) {
+    let nv = bigAdd(orig, 1);
+    const last = kvGet(VER_TAG);
+    if (last && /^[0-9]{1,20}$/.test(last) && bigCmp(nv, last) <= 0) nv = bigAdd(last, 1);
+    if (nv.length > 20) nv = nv.slice(-20);
+    kvSet(VER_TAG, nv);
+    return nv;
   }
   function clean(b, s, e, depth) {
     if (depth > 48 || !has(null, s, e)) return null;
@@ -817,82 +870,6 @@
     return out;
   }
 
-  const SIMPLE_KEY = "simple_mode_config";
-  function patchSimpleMode(js) {
-    let o;
-    try { o = JSON.parse(js); } catch (x) { return null; }
-    if (!o || typeof o !== "object" || Array.isArray(o)) return null;
-    if (!TAB_ON) return null;
-    const fc = o.feature_config && typeof o.feature_config === "object" ? o.feature_config : {};
-    if (o.enable === 1 && fc.enable === 1 && fc.tab_bar_cut_enable === 1 && fc.tab_bar_cut_whitelist === TAB_PLAN.cut) return null;
-    fc.enable = 1;
-    fc.tab_bar_cut_enable = 1;
-    fc.tab_bar_cut_whitelist = TAB_PLAN.cut;
-    o.enable = 1;
-    o.feature_config = fc;
-    return JSON.stringify(o);
-  }
-
-  function simpleModeJson() {
-    return JSON.stringify({ enable: 1, launch_config: { enable: 1, delay_create_tab_enable: 1, delay_create_tab_whitelist: "" }, feature_config: { enable: 1, tab_bar_cut_enable: 1, tab_bar_cut_whitelist: TAB_PLAN.cut } });
-  }
-  function simpleModeEntry() {
-    const v = concat([lenField(1, utf8(simpleModeJson())), ev(16), ev(11276), lenField(4, utf8(SIMPLE_KEY))]);
-    return concat([lenField(1, utf8(SIMPLE_KEY)), lenField(2, v)]);
-  }
-  function patchNoQuic(js) {
-    let o;
-    try { o = JSON.parse(js); } catch (x) { return null; }
-    const q = o && o.quic;
-    if (!q || typeof q !== "object" || (q.enabled === false && q.allPbReqEnabled === false && q.allJceReqEnabled === false)) return null;
-    q.enabled = false;
-    q.allPbReqEnabled = false;
-    q.allJceReqEnabled = false;
-    return JSON.stringify(o);
-  }
-  function patchNoPreResolve(js) {
-    let o;
-    try { o = JSON.parse(js); } catch (x) { return null; }
-    if (!o || typeof o !== "object" || Array.isArray(o) || (o.enablePreResolve === false && o.enableNac === false && o.enableHdns === false)) return null;
-    o.enablePreResolve = false;
-    o.enableNac = false;
-    o.enableHdns = false;
-    return JSON.stringify(o);
-  }
-   const AB_PATCH = { simple_mode_config: patchSimpleMode, ios_nx_netframework_compatible: patchNoQuic, ios_nx_netframework_compatible_bbtf: patchNoQuic, network_resolve_config: patchNoPreResolve };
-  const AB_NEEDLES = [utf8(SIMPLE_KEY), utf8("ios_nx_netframework_compatible"), utf8("network_resolve_config")];
-  function onAbConfig(raw) {
-    let u8 = raw, gz = false;
-    if (gzMagic(u8)) { u8 = gunzip(u8); gz = true; L("gunzip", "AB 配置解压后 " + btype(u8)); if (!u8) return null; }
-    const top = parse(u8, 0, u8.length);
-    if (!top) { L("AB", "protobuf 解析失败，放行"); return null; }
-    const edits = new Map();
-    let found = false;
-    for (const x of top) {
-      if (x.f !== 3 || x.w !== 2 || !AB_NEEDLES.some(kb => find(u8, kb, x.vs, x.e) >= 0)) continue;
-      const ef = parse(u8, x.vs, x.e);
-      const k = ef && ef.find(z => z.f === 1 && z.w === 2), v = ef && ef.find(z => z.f === 2 && z.w === 2);
-      const key = k && v ? ascii(u8, k.vs, k.e) : null;
-      if (!key || !Object.prototype.hasOwnProperty.call(AB_PATCH, key)) continue;
-      const vf = parse(u8, v.vs, v.e), j = vf && vf.find(z => z.f === 1 && z.w === 2);
-      if (!j) continue;
-      if (key === SIMPLE_KEY) found = true;
-      const js = text(u8, j.vs, j.e), nj = js ? AB_PATCH[key](js) : null;
-      if (!nj) continue;
-      const vm = new Map();
-      vm.set(j, lenField(1, utf8(nj)));
-      const nv = rebuild(u8, v.vs, v.e, vf, vm);
-      const em = new Map();
-      em.set(v, lenField(2, nv));
-      edits.set(x, lenField(3, rebuild(u8, x.vs, x.e, ef, em)));
-    }
-    let out = rebuild(u8, 0, u8.length, top, edits);
-    if (!out && TAB_ON && !found && top.some(x => x.f === 1 && x.w === 0 && x.v === 100) && top.some(x => x.f === 3 && x.w === 2)) out = concat([u8, lenField(3, simpleModeEntry())]);
-    if (!out) { L("AB", "没有可补丁的 simple_mode 条目，放行"); return null; }
-    L("AB", "已补丁 " + edits.size + " 处，" + u8.length + "→" + out.length + "B");
-    return gz ? gzip(out) : out;
-  }
-
   const IS_QX = typeof $task !== "undefined"; // Quantumult X 提供 $task，Loon 没有
   const MAX_BODY = 8 * 1024 * 1024;
 
@@ -1035,23 +1012,6 @@
     return u;
   }
 
-  // Loon 没有 TextDecoder，这里自己解 UTF-8（只用于 rdelivery 的 JSON 配置）
-  function utf8Decode(u) {
-    let s = "", i = 0;
-    const n = u.length;
-    while (i < n) {
-      const c = u[i++];
-      if (c < 0x80) s += String.fromCharCode(c);
-      else if (c > 0xbf && c < 0xe0) s += String.fromCharCode(((c & 0x1f) << 6) | (u[i++] & 0x3f));
-      else if (c > 0xdf && c < 0xf0) s += String.fromCharCode(((c & 0x0f) << 12) | ((u[i++] & 0x3f) << 6) | (u[i++] & 0x3f));
-      else {
-        const cp = ((c & 0x07) << 18) | ((u[i++] & 0x3f) << 12) | ((u[i++] & 0x3f) << 6) | (u[i++] & 0x3f);
-        s += cp > 0xffff ? String.fromCharCode(0xd7c0 + (cp >> 10), 0xdc00 + (cp & 0x3ff)) : String.fromCharCode(cp);
-      }
-    }
-    return s;
-  }
-
   // 回写：Loon 用 body(Uint8Array)，QX 用 bodyBytes(ArrayBuffer)
   function finish(u8) {
     if (!u8) { L("回写", "放行原响应/请求（$done({})）"); $done({}); return; }
@@ -1077,19 +1037,6 @@
         finish(out);
         return;
       }
-      if (host === "rdelivery.qq.com") {
-        STAGE = "灰度配置";
-        const raw = readBody($response);
-        if (!raw) { L("跳过", "灰度配置无响应体，放行"); $done({}); return; }
-        const s = utf8Decode(raw), hit = /"tab_gray"\s*:\s*true/.test(s);
-        L("灰度", "配置 " + s.length + " 字符，tab_gray=true? " + hit);
-        if (!hit) { L("回写", "放行原响应（$done({})）"); $done({}); return; }
-        const o = s.replace(/("tab_gray"\s*:\s*)true/, "$1false");
-        L("完成", "tab_gray 已关闭，" + s.length + " 字符");
-        if (IS_QX) $done({ body: o });
-        else $done({ body: utf8(o) });
-        return;
-      }
       STAGE = "读取响应体";
       const b = readBody($response);
       if (!b) { L("跳过", "无响应体，放行"); $done({}); return; }
@@ -1097,7 +1044,6 @@
       let r = null;
       if (host === "i.video.qq.com") { STAGE = "i.video 清洗"; r = onTrpcResponse(b); }
       else if (host === "iacc.qq.com") { STAGE = "iacc JCE"; r = onJce(b); }
-      else if (host === "config.ab.qq.com" && url.split("?")[0].endsWith("/tab/GetTabRemoteConfig")) { STAGE = "AB 配置"; r = onAbConfig(b); }
       else { L("跳过", "host=" + host + " 不处理，放行"); }
       L("完成", r ? "已修改 " + b.length + "→" + r.length + "B" : "无变化，放行 " + b.length + "B");
       finish(r);
