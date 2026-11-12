@@ -1,0 +1,14 @@
+Loon/QQLiveCleanNew.lpx
+  h_ae199c2e021e7b 45,47,49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ae25ca7029129143d6e770d8958bf57ad60a7ac0",
+  "prompts": {},
+  "humans": {
+    "h_ae199c2e021e7b": {
+      "author": "LQAD\\hlliu1 <hlliu1@leqee.com>"
+    }
+  }
+}
