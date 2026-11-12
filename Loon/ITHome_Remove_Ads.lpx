@@ -1,0 +1,22 @@
+#!name = IT之家去广告
+#!desc = 过滤IT之家信息流广告和文末广告，自定义移除置顶和轮播图。自定义移除项需在插件配置，此插件仅支持8.30及以上版本客户端。
+#!openUrl = 
+#!author = keywos
+#!icon = https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/IThome.png
+#!date = 2026-11-12 10:37:40
+
+
+[Argument]
+removeAllBanners = switch,true,tag=删顶部横幅,desc=删除 feedType=10002 的轮播/横幅
+removePinnedArticles = switch,true,tag=删置顶文章,desc=删除 feedType=10003 的置顶
+removeHongbao = switch,true,tag=删无门槛红包条幅,desc=删除 feedType=10023 且 templateName=hongbao 的红包条幅
+
+
+[Rewrite]
+request if ${url} ~= /^https?:\/\/dat\.ruanmei\.com\/ithome\/money\/acd\.json$/i then reject(404)
+
+[Script]
+response if ${url} ~= /^https:\/\/napi\.ithome\.com\/api\/(news\/indexv2\/iphone\/\d+|topmenu\/getfeeds\?)/i then script("https://kelee.one/Resource/JavaScript/IThome/IThome_remove_ads.js", {${removeAllBanners}, ${removePinnedArticles},${removeHongbao}}) with tag="IT之家去广告", requires_body=true
+  
+[Mitm]
+hostname = napi.ithome.com, api.zuihuimai.com, dat.ruanmei.com
