@@ -25,6 +25,14 @@
 //   3) 删掉 config.ab.qq.com / rdelivery.qq.com 两条规则：9.04.80 的
 //      GetTabRemoteConfig 返回的是打点 AB 采样配置（带 check_sum），里面没有
 //      simple_mode_config，塞条目删不掉 Tab，还有弄坏打点配置的风险。
+// v1.0.5（2026-11-12）—— 延迟修好后仍然 5 个 Tab，改“自洽性”：
+//   新日志里 3 次改写都在 2ms 内完成（[Tab] 直接紧跟在 [入口] 后面），说明慢的问题解决了；
+//   但客户端 3 秒内连发了 4 次 getNaviPage，说明它认为这页数据“不完整/不一致”，
+//   于是退回本地默认 Tab。所以这一版把删 Tab 之后所有相关计数一起改掉：
+//   1) 每条 Tab 的 f2 顺序号 与 f22 元数据里的 item_idx 一起重排（原来只改了 f2）；
+//   2) 页面级 sdk_page_ctx 里的 page_size 跟着改成实际剩下的个数（原来还是 5）；
+//   3) 版本号换成「原值前 11 位 + 当前秒数后 9 位」，不再依赖 $persistentStore
+//      （Loon 里跨求值读不回来，导致每次都是 …327→…328 同一个值）。
 // ============================================================
 
 (() => {
@@ -36,6 +44,8 @@
     a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "短视频", "好物"] },
     b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "VIP会员", "好物"] }
   };
+  // 本次响应里删掉了多少个 Tab、原来有几个（供页面级计数修正使用）
+  let TAB_KEPT = 0, TAB_OLD = 0;
   const AD_ANY = ["AdResponseInfo", "InnerAdPromotionEventList", "InnerAdCommonPromotionEventActivityList", "LoadingConfig", "PreloadResourceInfo", "AdFeedInfo"];
   const DROP_MODULES = ["user_center_more_function"];
   const AD_MODULE_IDS = ["outerPaster"];
@@ -449,18 +459,12 @@
       const it = items[i];
       if (drop.has(it)) { edits.set(it, DROP); continue; }
       kept.push(names[i]);
-      const ik = parse(b, it.vs, it.e), ie = new Map();
-      let hasIdx = false;
-      for (const r of ik) {
-        // 顺序号原地替换：字段顺序和原始字节布局保持一致，少一种被客户端判错的写法
-        if (r.f === 2 && r.w === 0) { hasIdx = true; ie.set(r, concat([ev(16), ev(idx)])); }
-      }
-      // 首项的顺序号 0 在原包里本来就不写，这里也不额外补，尽量少改动字节
-      const body2 = hasIdx ? rebuild(b, it.vs, it.e, ik, ie)
-        : (idx > 0 ? concat([ev(16), ev(idx), b.subarray(it.vs, it.e)]) : b.subarray(it.vs, it.e));
-      edits.set(it, lenField(1, body2));
+      const nb2 = rebuildTabItem(b, it.vs, it.e, idx);
+      edits.set(it, lenField(1, nb2 || b.subarray(it.vs, it.e)));
       idx++;
     }
+    TAB_KEPT = idx;
+    TAB_OLD = items.length;
     // 版本号（f4，20 位十进制）：一定要严格变大，客户端才会丢掉本地缓存重新应用
     const ver = vf.find(r => r.f === 4 && r.w === 2 && /^[0-9]{1,20}$/.test(ascii(b, r.vs, r.e) || ""));
     let verTxt = "", newVer = "";
@@ -477,7 +481,6 @@
   // 老写法是每次 +1。但服务端每次下发的原值是固定的，客户端却把 +1 之后的值
   // 存进了本地缓存，于是下一次再收到同样的 +1 就判成「没更新」，永远用旧 Tab。
   // 这里改成持久化计数器：无论服务端给什么，永远给出比上次更大的值。
-  const VER_TAG = "txvideo_tabver";
   function bigAdd(s, n) {
     const a = s.split("");
     let i = a.length - 1, carry = n;
@@ -493,22 +496,78 @@
     if (x.length !== y.length) return x.length < y.length ? -1 : 1;
     return x === y ? 0 : (x < y ? -1 : 1);
   }
-  function kvGet(k) {
-    try { if (typeof $persistentStore !== "undefined" && $persistentStore.read) return $persistentStore.read(k); } catch (e) {}
-    try { if (typeof $prefs !== "undefined" && $prefs.valueForKey) return $prefs.valueForKey(k); } catch (e) {}
-    return null;
-  }
-  function kvSet(k, v) {
-    try { if (typeof $persistentStore !== "undefined" && $persistentStore.write) { $persistentStore.write(v, k); return; } } catch (e) {}
-    try { if (typeof $prefs !== "undefined" && $prefs.setValueForKey) { $prefs.setValueForKey(v, k); return; } } catch (e) {}
-  }
+  // 只 +1 是不够的：服务端每次都给同一个原值，客户端缓存里却是「上次 +1 后的值」，
+  // 下次再收到同样的值就被判成「没更新」，永远沿用旧 Tab。
+  // 实测 Loon 里 $persistentStore 跨求值读不回来（日志里每次都是 …327→…328），
+  // 所以改成不依赖存储的做法：原值前 11 位 + 当前秒数的后 9 位，
+  // 保持 20 位宽度，且永远比原值大、随时间递增。
   function nextVer(orig) {
-    let nv = bigAdd(orig, 1);
-    const last = kvGet(VER_TAG);
-    if (last && /^[0-9]{1,20}$/.test(last) && bigCmp(nv, last) <= 0) nv = bigAdd(last, 1);
-    if (nv.length > 20) nv = nv.slice(-20);
-    kvSet(VER_TAG, nv);
+    const sec = String(Math.floor(Date.now() / 1000) % 1000000000).padStart(9, "0");
+    let nv = orig.slice(0, 11) + sec;
+    if (!/^[0-9]{20}$/.test(nv) || bigCmp(nv, orig) <= 0) nv = bigAdd(orig, 1);
     return nv;
+  }
+  // 一条 Tab 里有两处索引：f2 顺序号，以及 f22 元数据里的 item_idx
+  // （f22 = {1: 埋点key, 2: {1:"mod_id",2:...}, 2: {1:"data_source",...}, 2: {1:"item_idx",2:"0"}}）。
+  // 删完 Tab 必须一起重排，否则客户端按元数据算槽位会对不上。
+  function setItemIdx(b, s, e, idx, depth) {
+    if (depth > 3) return null;
+    const fs = parse(b, s, e);
+    if (!fs) return null;
+    const edits = new Map();
+    for (const x of fs) {
+      if (x.f !== 2 || x.w !== 2) continue;
+      const kv = parse(b, x.vs, x.e);
+      if (!kv) continue;
+      const k = kv.find(z => z.f === 1 && z.w === 2), v = kv.find(z => z.f === 2 && z.w === 2);
+      if (k && v && ascii(b, k.vs, k.e) === "item_idx") {
+        edits.set(x, lenField(2, concat([lenField(1, utf8("item_idx")), lenField(2, utf8(String(idx)))])));
+        continue;
+      }
+      const sub = setItemIdx(b, x.vs, x.e, idx, depth + 1);
+      if (sub) edits.set(x, lenField(2, sub));
+    }
+    if (!edits.size) return null;
+    return rebuild(b, s, e, fs, edits);
+  }
+  function rebuildTabItem(b, s, e, idx) {
+    const fs = parse(b, s, e);
+    if (!fs) return null;
+    const edits = new Map();
+    for (const x of fs) {
+      if (x.f === 2 && x.w === 0) { edits.set(x, concat([ev(16), ev(idx)])); continue; }
+      if (x.f === 22 && x.w === 2) {
+        const nm = setItemIdx(b, x.vs, x.e, idx, 0);
+        if (nm) edits.set(x, lenField(22, nm));
+      }
+    }
+    let out = rebuild(b, s, e, fs, edits);
+    if (!out) return idx > 0 ? concat([ev(16), ev(idx), b.subarray(s, e)]) : null;
+    if (!fs.some(x => x.f === 2 && x.w === 0) && idx > 0) out = concat([ev(16), ev(idx), out]);
+    return out;
+  }
+  // 页面级计数：sdk_page_ctx = {"page_offset":1,"page_size":5,"used_module_num":7}。
+  // 删完 Tab 后 page_size 还写 5，客户端会以为这一页没收全，反复重试后返回本地默认 Tab。
+  function fixPageCount(body, kept, old) {
+    const top = parse(body, 0, body.length);
+    if (!top) return body;
+    const edits = new Map();
+    for (const x of top) {
+      if (x.f !== 3 || x.w !== 2) continue;
+      const ef = parse(body, x.vs, x.e);
+      if (!ef) continue;
+      const k = ef.find(z => z.f === 1 && z.w === 2), v = ef.find(z => z.f === 2 && z.w === 2);
+      if (!k || !v || ascii(body, k.vs, k.e) !== "sdk_page_ctx") continue;
+      const js = text(body, v.vs, v.e);
+      if (!js || js.indexOf('"page_size":' + old) < 0) continue;
+      const nj = js.replace('"page_size":' + old, '"page_size":' + kept);
+      const ve = new Map();
+      ve.set(v, lenField(2, utf8(nj)));
+      edits.set(x, lenField(3, rebuild(body, x.vs, x.e, ef, ve)));
+      L("Tab", "sdk_page_ctx.page_size " + old + "→" + kept);
+    }
+    if (!edits.size) return body;
+    return rebuild(body, 0, body.length, top, edits) || body;
   }
   function clean(b, s, e, depth) {
     if (depth > 48 || !has(null, s, e)) return null;
@@ -616,15 +675,33 @@
     if (!fr) { L("i.video", "不是 tRPC 帧（首字节 0x" + ((u8 && u8[0]) || 0).toString(16) + "），放行"); return null; }
     indexMarkers(u8, fr.he, u8.length);
     L("i.video", "tRPC 帧 OK：头 " + fr.he + "B / 体 " + (u8.length - fr.he) + "B");
-    const body = transform(u8, fr.he, u8.length);
+    TAB_KEPT = 0; TAB_OLD = 0;
+    let body = transform(u8, fr.he, u8.length);
     if (!body) {
       L("i.video", has(null, fr.he, u8.length) ? "包内有广告标记但没命中删除规则（可能是未覆盖的新结构）" : "解析完成，未命中广告元素，放行");
       return null;
     }
+    if (TAB_KEPT) body = fixPageCount(body, TAB_KEPT, TAB_OLD);
     const out = concat([u8.subarray(0, fr.he), body]);
     put32(out, 4, out.length);
     L("i.video", "清洗生效：" + u8.length + "→" + out.length + "B");
     return gz ? gzip(out) : out;
+  }
+  // 请求体顶层的 {1:key, 2:value} 表格（page_id / data_identifier 就在这里）
+  function kvOf(b, s, e) {
+    const out = {};
+    const fs = parse(b, s, e);
+    if (!fs) return out;
+    for (const x of fs) {
+      if (x.f !== 1 || x.w !== 2) continue;
+      const p = parse(b, x.vs, x.e);
+      if (!p) continue;
+      const k = p.find(z => z.f === 1 && z.w === 2), v = p.find(z => z.f === 2 && z.w === 2);
+      if (!k) continue;
+      const key = ascii(b, k.vs, k.e);
+      if (key) out[key] = v ? (text(b, v.vs, v.e) || "") : "";
+    }
+    return out;
   }
   function onTrpcRequest(raw) {
     let u8 = raw, gz = false;
@@ -635,6 +712,11 @@
     const func = fn ? ascii(u8, fn.vs, fn.e) : null;
     if (!func) { L("请求", "tRPC 帧里没有 func 字段，放行"); return null; }
     const nf = normFunc(func);
+    if (/getNaviPage$/.test(nf)) {
+      // 诊断用：data_identifier 有值说明客户端本地已经缓存过这页导航数据
+      const m = kvOf(u8, fr.he, u8.length);
+      L("请求", "getNaviPage page_id=" + (m.page_id || "?") + " data_identifier=" + (m.data_identifier ? m.data_identifier : "(空)"));
+    }
     const hitList = BLOCK_FUNCS.some(x => normFunc(x) === nf);
     const hitRe = BLOCK_RE.test(nf);
     if (!hitList && !hitRe) { L("请求", "RPC=" + nf + " 不在拦截名单"); return null; }
