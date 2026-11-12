@@ -49,15 +49,15 @@ DOMAIN,tacc.video.qq.com,REJECT
 
 [Script]
 # i.video.qq.com 请求侧：拦截开屏、贴片、信息流等广告 RPC
-request if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(\?.*)?$/ then script("https://cdn.jsdelivr.net/gh/JackLhang/rewrite@main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-广告请求", timeout=8, requires_body=true, binary_body_mode=true
+request if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(\?.*)?$/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-广告请求", timeout=8, requires_body=true, binary_body_mode=true
 # i.video.qq.com 响应侧：清理 protobuf(tRPC) 内的广告元素与多余 Tab
-response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(\?.*)?$/ then script("https://cdn.jsdelivr.net/gh/JackLhang/rewrite@main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-播放页", timeout=8, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(\?.*)?$/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-播放页", timeout=8, requires_body=true, binary_body_mode=true
 # iacc.qq.com：JCE 二进制，处理播放提示、贴片广告、暂停广告、青少年弹窗
-response if ${url} ~= /^https?:\/\/iacc\.qq\.com\/(\?.*)?$/ then script("https://cdn.jsdelivr.net/gh/JackLhang/rewrite@main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-JCE", timeout=8, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/iacc\.qq\.com\/(\?.*)?$/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-JCE", timeout=8, requires_body=true, binary_body_mode=true
 # config.ab.qq.com：AB 配置，补 simple_mode_config（底部 Tab 裁剪开关）
-response if ${url} ~= /^https?:\/\/config\.ab\.qq\.com\/tab\/GetTabRemoteConfig/ then script("https://cdn.jsdelivr.net/gh/JackLhang/rewrite@main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-AB配置", timeout=8, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/config\.ab\.qq\.com\/tab\/GetTabRemoteConfig/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-AB配置", timeout=8, requires_body=true, binary_body_mode=true
 # rdelivery.qq.com：SDK 灰度，关掉 tab_gray
-response if ${url} ~= /^https?:\/\/rdelivery\.qq\.com\// then script("https://cdn.jsdelivr.net/gh/JackLhang/rewrite@main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-SDK灰度", timeout=8, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/rdelivery\.qq\.com\// then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-SDK灰度", timeout=8, requires_body=true, binary_body_mode=true
 
 [MITM]
 hostname = i.video.qq.com, iacc.qq.com, config.ab.qq.com, rdelivery.qq.com
