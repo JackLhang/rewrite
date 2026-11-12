@@ -30,9 +30,22 @@
 //   但客户端 3 秒内连发了 4 次 getNaviPage，说明它认为这页数据“不完整/不一致”，
 //   于是退回本地默认 Tab。所以这一版把删 Tab 之后所有相关计数一起改掉：
 //   1) 每条 Tab 的 f2 顺序号 与 f22 元数据里的 item_idx 一起重排（原来只改了 f2）；
-//   2) 页面级 sdk_page_ctx 里的 page_size 跟着改成实际剩下的个数（原来还是 5）；
-//   3) 版本号换成「原值前 11 位 + 当前秒数后 9 位」，不再依赖 $persistentStore
+//   2) 版本号换成「原值前 11 位 + 当前秒数后 9 位」，不再依赖 $persistentStore
 //      （Loon 里跨求值读不回来，导致每次都是 …327→…328 同一个值）。
+// v1.0.6（2026-11-12）—— 改回上游原本的做法，并加一个「看得见」的探针：
+//   日志确认 v1.0.5 真的跑起来了（[请求] getNaviPage … data_identifier=… 有打印），
+//   3783→2730B 的改写、版本号、item_idx 都生效，App 底部仍然是 5 个 Tab。
+//   说明「从 GetTabListRsp 里删项」这条路客户端根本不认，得回到 Tab 裁剪开关：
+//   1) 恢复 config.ab.qq.com/tab/GetTabRemoteConfig 的改写：客户端裁不裁底部 Tab
+//      看的是 AB 开关 simple_mode_config（feature_config.tab_bar_cut_enable=1 +
+//      tab_bar_cut_whitelist="0;2;4"）。9.04.80 这条通道只下发打点采样配置，
+//      里面没有这个 key —— 所以直接往响应里补一条 f3 条目（protobuf 结构合法）。
+//      另把 QUIC / 预解析关掉：QUIC 走 UDP，Loon 抓不到，开着会让所有改写形同虚设。
+//   2) 恢复 rdelivery.qq.com 的 tab_gray=true → false。
+//   3) 撤销 v1.0.5 里改 sdk_page_ctx.page_size 的做法：首页那条响应的
+//      page_size=5 / used_module_num=36 说明它是「分页粒度」，不是 Tab 个数，改错了。
+//   4) 加探针：保留的第 1 个 Tab 标题后面加「·改」。重开 App 后看底部第一个 Tab：
+//      标题变了 = 客户端确实用这份列表（问题在结构上）；没变 = 底部栏不来自这条响应。
 // ============================================================
 
 (() => {
@@ -40,6 +53,12 @@
   //   a（tabvip=关，默认）= 删「短剧/短视频」「好物」，留 首页 / 会员专区 / 我的
   //   b（tabvip=开）       = 删「会员专区/VIP会员」「好物」，留 首页 / 短视频 / 我的
   // 判断方式：既看 f22 的埋点 key（*_entrance），也看 f3 标题，任一命中就删。
+  // 诊断探针：给保留的第 1 个 Tab 标题加后缀。重开 App 后看底部第一个 Tab 标题有没有变：
+  //   变了 = 客户端确实在用这条响应（那就只是结构细节没对上）；
+  //   没变 = 底部栏根本不来自这条响应，别再在 GetTabListRsp 上耗时间。
+  // 排查完把 TAB_PROBE 改成 false 即可恢复原样。
+  const TAB_PROBE = true;
+  const TAB_PROBE_TXT = "·改";
   const TAB_PLANS = {
     a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "短视频", "好物"] },
     b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "VIP会员", "好物"] }
@@ -459,7 +478,7 @@
       const it = items[i];
       if (drop.has(it)) { edits.set(it, DROP); continue; }
       kept.push(names[i]);
-      const nb2 = rebuildTabItem(b, it.vs, it.e, idx);
+      const nb2 = rebuildTabItem(b, it.vs, it.e, idx, idx === 0 && TAB_PROBE ? TAB_PROBE_TXT : "");
       edits.set(it, lenField(1, nb2 || b.subarray(it.vs, it.e)));
       idx++;
     }
@@ -530,10 +549,15 @@
     if (!edits.size) return null;
     return rebuild(b, s, e, fs, edits);
   }
-  function rebuildTabItem(b, s, e, idx) {
+  function rebuildTabItem(b, s, e, idx, addTitle) {
     const fs = parse(b, s, e);
     if (!fs) return null;
     const edits = new Map();
+    if (addTitle) {
+      const t = fs.find(r => r.f === 3 && r.w === 2);
+      const cur = t ? text(b, t.vs, t.e) : null;
+      if (cur) edits.set(t, lenField(3, utf8(cur + addTitle)));
+    }
     for (const x of fs) {
       if (x.f === 2 && x.w === 0) { edits.set(x, concat([ev(16), ev(idx)])); continue; }
       if (x.f === 22 && x.w === 2) {
@@ -545,29 +569,6 @@
     if (!out) return idx > 0 ? concat([ev(16), ev(idx), b.subarray(s, e)]) : null;
     if (!fs.some(x => x.f === 2 && x.w === 0) && idx > 0) out = concat([ev(16), ev(idx), out]);
     return out;
-  }
-  // 页面级计数：sdk_page_ctx = {"page_offset":1,"page_size":5,"used_module_num":7}。
-  // 删完 Tab 后 page_size 还写 5，客户端会以为这一页没收全，反复重试后返回本地默认 Tab。
-  function fixPageCount(body, kept, old) {
-    const top = parse(body, 0, body.length);
-    if (!top) return body;
-    const edits = new Map();
-    for (const x of top) {
-      if (x.f !== 3 || x.w !== 2) continue;
-      const ef = parse(body, x.vs, x.e);
-      if (!ef) continue;
-      const k = ef.find(z => z.f === 1 && z.w === 2), v = ef.find(z => z.f === 2 && z.w === 2);
-      if (!k || !v || ascii(body, k.vs, k.e) !== "sdk_page_ctx") continue;
-      const js = text(body, v.vs, v.e);
-      if (!js || js.indexOf('"page_size":' + old) < 0) continue;
-      const nj = js.replace('"page_size":' + old, '"page_size":' + kept);
-      const ve = new Map();
-      ve.set(v, lenField(2, utf8(nj)));
-      edits.set(x, lenField(3, rebuild(body, x.vs, x.e, ef, ve)));
-      L("Tab", "sdk_page_ctx.page_size " + old + "→" + kept);
-    }
-    if (!edits.size) return body;
-    return rebuild(body, 0, body.length, top, edits) || body;
   }
   function clean(b, s, e, depth) {
     if (depth > 48 || !has(null, s, e)) return null;
@@ -681,7 +682,6 @@
       L("i.video", has(null, fr.he, u8.length) ? "包内有广告标记但没命中删除规则（可能是未覆盖的新结构）" : "解析完成，未命中广告元素，放行");
       return null;
     }
-    if (TAB_KEPT) body = fixPageCount(body, TAB_KEPT, TAB_OLD);
     const out = concat([u8.subarray(0, fr.he), body]);
     put32(out, 4, out.length);
     L("i.video", "清洗生效：" + u8.length + "→" + out.length + "B");
@@ -1094,6 +1094,118 @@
     return u;
   }
 
+  // ── AB 配置：底部 Tab 到底能不能裁，开关在这里 ────────────────
+  // 客户端读的是 simple_mode_config 这个 AB 开关：
+  //   feature_config.tab_bar_cut_enable = 1        → 允许裁剪底部 Tab
+  //   feature_config.tab_bar_cut_whitelist = "0;2;4" → 保留哪些 tab（分号分隔，其余不显示）
+  // 9.04.80 的 config.ab.qq.com/tab/GetTabRemoteConfig 只下发打点采样配置
+  // （sample.xxx + switches + check_sum），里面没有这个 key，所以要自己补一条：
+  // 顶层追加一个 f3 条目（{1:key, 2:{1:json, 2:11276, 4:key}}），protobuf 结构合法。
+  // 顺带关掉 QUIC / 预解析：QUIC 走 UDP，Loon 抓不到也改不了，开着其它改写都会失效。
+  const SIMPLE_KEY = "simple_mode_config";
+  function cutWhitelist() { return TAB_PLAN === TAB_PLANS.b ? "0;1;4" : "0;2;4"; }
+  function patchSimpleMode(js) {
+    let o;
+    try { o = JSON.parse(js); } catch (x) { return null; }
+    if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+    const fc = o.feature_config && typeof o.feature_config === "object" ? o.feature_config : {};
+    if (o.enable === 1 && fc.enable === 1 && fc.tab_bar_cut_enable === 1 && fc.tab_bar_cut_whitelist === cutWhitelist()) return null;
+    fc.enable = 1;
+    fc.tab_bar_cut_enable = 1;
+    fc.tab_bar_cut_whitelist = cutWhitelist();
+    o.enable = 1;
+    o.feature_config = fc;
+    return JSON.stringify(o);
+  }
+  function simpleModeJson() {
+    return JSON.stringify({
+      enable: 1,
+      launch_config: { enable: 1, delay_create_tab_enable: 1, delay_create_tab_whitelist: "" },
+      feature_config: { enable: 1, tab_bar_cut_enable: 1, tab_bar_cut_whitelist: cutWhitelist() },
+    });
+  }
+  function simpleModeEntry() {
+    const v = concat([lenField(1, utf8(simpleModeJson())), ev(16), ev(11276), lenField(4, utf8(SIMPLE_KEY))]);
+    return concat([lenField(1, utf8(SIMPLE_KEY)), lenField(2, v)]);
+  }
+  function patchNoQuic(js) {
+    let o;
+    try { o = JSON.parse(js); } catch (x) { return null; }
+    const q = o && o.quic;
+    if (!q || typeof q !== "object" || (q.enabled === false && q.allPbReqEnabled === false && q.allJceReqEnabled === false)) return null;
+    q.enabled = false;
+    q.allPbReqEnabled = false;
+    q.allJceReqEnabled = false;
+    return JSON.stringify(o);
+  }
+  function patchNoPreResolve(js) {
+    let o;
+    try { o = JSON.parse(js); } catch (x) { return null; }
+    if (!o || typeof o !== "object" || Array.isArray(o) || (o.enablePreResolve === false && o.enableNac === false && o.enableHdns === false)) return null;
+    o.enablePreResolve = false;
+    o.enableNac = false;
+    o.enableHdns = false;
+    return JSON.stringify(o);
+  }
+  const AB_PATCH = {
+    simple_mode_config: patchSimpleMode,
+    ios_nx_netframework_compatible: patchNoQuic,
+    ios_nx_netframework_compatible_bbtf: patchNoQuic,
+    network_resolve_config: patchNoPreResolve,
+  };
+  const AB_NEEDLES = [utf8(SIMPLE_KEY), utf8("ios_nx_netframework_compatible"), utf8("network_resolve_config")];
+  function onAbConfig(raw) {
+    let u8 = raw, gz = false;
+    if (gzMagic(u8)) { u8 = gunzip(u8); gz = true; L("AB", "配置解压后 " + btype(u8)); if (!u8) return null; }
+    const top = parse(u8, 0, u8.length);
+    if (!top) { L("AB", "protobuf 解析失败，放行"); return null; }
+    const edits = new Map();
+    let found = false;
+    for (const x of top) {
+      if (x.f !== 3 || x.w !== 2 || !AB_NEEDLES.some(kb => find(u8, kb, x.vs, x.e) >= 0)) continue;
+      const ef = parse(u8, x.vs, x.e);
+      const k = ef && ef.find(z => z.f === 1 && z.w === 2), v = ef && ef.find(z => z.f === 2 && z.w === 2);
+      const key = k && v ? ascii(u8, k.vs, k.e) : null;
+      if (!key || !Object.prototype.hasOwnProperty.call(AB_PATCH, key)) continue;
+      const vf = parse(u8, v.vs, v.e), j = vf && vf.find(z => z.f === 1 && z.w === 2);
+      if (!j) continue;
+      if (key === SIMPLE_KEY) found = true;
+      const js = text(u8, j.vs, j.e), nj = js ? AB_PATCH[key](js) : null;
+      if (!nj) continue;
+      const vm = new Map();
+      vm.set(j, lenField(1, utf8(nj)));
+      const nv = rebuild(u8, v.vs, v.e, vf, vm);
+      if (!nv) continue;
+      const em = new Map();
+      em.set(v, lenField(2, nv));
+      const nx = rebuild(u8, x.vs, x.e, ef, em);
+      if (!nx) continue;
+      edits.set(x, lenField(3, nx));
+      L("AB", "已改写 " + key);
+    }
+    let out = edits.size ? rebuild(u8, 0, u8.length, top, edits) : null;
+    if (!out && !found && top.some(x => x.f === 1 && x.w === 0 && x.v === 100) && top.some(x => x.f === 3 && x.w === 2)) {
+      out = concat([u8, lenField(3, simpleModeEntry())]);
+      L("AB", "下发里没有 " + SIMPLE_KEY + "，已补一条：tab_bar_cut_enable=1 whitelist=" + cutWhitelist() + "，" + u8.length + "→" + out.length + "B");
+    }
+    if (!out) { L("AB", "没有可补丁的条目，放行 " + u8.length + "B"); return null; }
+    return gz ? gzip(out) : out;
+  }
+
+  // rdelivery.qq.com：SDK 灰度配置。tab_gray=true 时新 Tab 逻辑按灰度走，
+  // 顺手关掉，让裁剪开关在所有版本上一致生效。
+  function onRdelivery(raw) {
+    let u8 = raw, gz = false;
+    if (gzMagic(u8)) { u8 = gunzip(u8); gz = true; if (!u8) return null; }
+    const s0 = text(u8, 0, u8.length);
+    if (!s0) { L("灰度", "响应不是 UTF-8 文本，放行 " + u8.length + "B"); return null; }
+    if (!/"tab_gray"\s*:\s*true/.test(s0)) { L("灰度", "配置 " + s0.length + " 字符，没有 tab_gray=true，放行"); return null; }
+    const o = s0.replace(/("tab_gray"\s*:\s*)true/, "$1false");
+    L("灰度", "tab_gray true→false，" + s0.length + " 字符");
+    const out = utf8(o);
+    return gz ? gzip(out) : out;
+  }
+
   // 回写：Loon 用 body(Uint8Array)，QX 用 bodyBytes(ArrayBuffer)
   function finish(u8) {
     if (!u8) { L("回写", "放行原响应/请求（$done({})）"); $done({}); return; }
@@ -1126,6 +1238,8 @@
       let r = null;
       if (host === "i.video.qq.com") { STAGE = "i.video 清洗"; r = onTrpcResponse(b); }
       else if (host === "iacc.qq.com") { STAGE = "iacc JCE"; r = onJce(b); }
+      else if (host === "config.ab.qq.com" && url.split("?")[0].endsWith("/tab/GetTabRemoteConfig")) { STAGE = "AB 配置"; r = onAbConfig(b); }
+      else if (host === "rdelivery.qq.com") { STAGE = "SDK 灰度"; r = onRdelivery(b); }
       else { L("跳过", "host=" + host + " 不处理，放行"); }
       L("完成", r ? "已修改 " + b.length + "→" + r.length + "B" : "无变化，放行 " + b.length + "B");
       finish(r);
