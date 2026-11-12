@@ -44,8 +44,17 @@
 //   2) 恢复 rdelivery.qq.com 的 tab_gray=true → false。
 //   3) 撤销 v1.0.5 里改 sdk_page_ctx.page_size 的做法：首页那条响应的
 //      page_size=5 / used_module_num=36 说明它是「分页粒度」，不是 Tab 个数，改错了。
-//   4) 加探针：保留的第 1 个 Tab 标题后面加「·改」。重开 App 后看底部第一个 Tab：
-//      标题变了 = 客户端确实用这份列表（问题在结构上）；没变 = 底部栏不来自这条响应。
+//   4) 加探针：保留的第 1 个 Tab 标题后面加「·改」。
+// v1.0.7（2026-11-12）—— 上一轮的探针测试有个漏洞，这次拆成单变量重测：
+//   上一版同时做了「删 2 项」+「改标题」两件事。如果客户端因为「删项」这份列表
+//   整体不合法而弃用，那标题自然也不会变 —— 那就白测了。
+//   所以这一版进入 TAB_TEST="title" 测试模式：**一个字节都不删**，只把第一个
+//   Tab 的标题从「首页」改成「首页·改」，版本号也不动。这样只有一个变量：
+//     标题变成「首页·改」 → 客户端确实在采用这条响应，问题出在「删项」上，
+//                          下一步只删「好物」一项，逐项排除结构原因；
+//     标题还是「首页」   → 客户端压根不采用这条响应渲染底部栏，
+//                          GetTabListRsp 这条线到此为止，改走 AB 开关 / 其它入口。
+//   AB 配置那条路（补 simple_mode_config）保持不变，继续一起验证。
 // ============================================================
 
 (() => {
@@ -59,6 +68,8 @@
   // 排查完把 TAB_PROBE 改成 false 即可恢复原样。
   const TAB_PROBE = true;
   const TAB_PROBE_TXT = "·改";
+  // "title" = 只改标题不删项（单变量诊断）；"cut" = 正常删项
+  const TAB_TEST = "title";
   const TAB_PLANS = {
     a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "短视频", "好物"] },
     b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "VIP会员", "好物"] }
@@ -456,6 +467,26 @@
     if (!v) return null;
     const vf = parse(b, v.vs, v.e);
     if (!vf) return null;
+    if (TAB_TEST === "title") {
+      // 单变量诊断：不删任何项，只改第一个 Tab 的标题
+      const items0 = vf.filter(r => r.f === 1 && r.w === 2);
+      const it0 = items0[0];
+      if (!it0) return null;
+      const sub0 = parse(b, it0.vs, it0.e);
+      const t0 = sub0 && sub0.find(r => r.f === 3 && r.w === 2);
+      const cur0 = t0 ? text(b, t0.vs, t0.e) : null;
+      if (!cur0) return null;
+      const e0 = new Map();
+      e0.set(t0, lenField(3, utf8(cur0 + TAB_PROBE_TXT)));
+      const ni0 = rebuild(b, it0.vs, it0.e, sub0, e0);
+      if (!ni0) return null;
+      const vf0 = new Map();
+      vf0.set(it0, lenField(1, ni0));
+      const nv0 = rebuild(b, v.vs, v.e, vf, vf0);
+      if (!nv0) return null;
+      L("Tab", "测试模式(只改标题)：第一个 Tab「" + cur0 + "」→「" + cur0 + TAB_PROBE_TXT + "」，Tab 数仍为 " + items0.length + "，版本号不动");
+      return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nv0), b.subarray(v.e, x.e)]));
+    }
     const items = vf.filter(r => r.f === 1 && r.w === 2), drop = new Set(), names = [];
     for (const it of items) {
       const ik = parse(b, it.vs, it.e);
