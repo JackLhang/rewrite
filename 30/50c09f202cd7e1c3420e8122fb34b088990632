@@ -1,0 +1,17 @@
+Loon/ITHome_Remove_Ads.lpx
+  h_ae199c2e021e7b 6-13,16,19
+script/itHome.js
+  h_ae199c2e021e7b 1-19,21-36,38-49,51-61,63,65-76,78-81,84-116,118-130
+  h_ae199c2e021e7b 37,50,62,64,77,82-83,117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3050c09f202cd7e1c3420e8122fb34b088990632",
+  "prompts": {},
+  "humans": {
+    "h_ae199c2e021e7b": {
+      "author": "LQAD\\hlliu1 <hlliu1@leqee.com>"
+    }
+  }
+}
