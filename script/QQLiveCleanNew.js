@@ -12,6 +12,14 @@
 //   i.video.qq.com        请求：拦截广告 RPC 调用
 //   iacc.qq.com           JCE 二进制响应：播放提示、贴片广告、暂停广告、青少年弹窗
 //
+// v1.2.1（2026-11-13）—— 只改脚本、不动插件、不加仓库文件：
+//   1) 方案用代码强制成 a（清空「短剧+好物」）。原因：插件页 tabvip 存下来的是「开」
+//      （本轮日志打的就是「方案 删VIP会员+好物」，所以短剧一直保留），
+//      开关值只有重装 .lpx 才回落默认，这轮只换脚本，所以先在代码里钉死方案；
+//      想交回开关控制，把 PLAN_FORCE 改成 null。
+//   2) 清空法的图标改用空字符串，不再依赖 assets/blank.png。
+//   3) 其余同 v1.2.0：AB 改写关闭（有 check_sum，改它可能让整份 AB 配置被丢 → 疑似开屏回归）、
+//      开屏补丁 11 处、Tab 走「保留 5 槽位 + 清空标题图标」。
 // v1.0.4（2026-11-12）修复「底部 Tab 删不掉」：
 //   1) 根因是延迟，不是删除逻辑：抓包里脚本已经把 GetTabListRsp 从 5 项改成 3 项，
 //      但这笔 getNaviPage 是请求发出 14.4s 后才回写（请求侧排队 8.8s + 响应侧 5.3s），
@@ -104,6 +112,34 @@
   const RENAME_TXT = "·改";
   // "cut" = 正常删项（受插件页「删除底部Tab」开关控制）
   const TAB_TEST = "cut";
+  // ── 清空法（v1.2.0）────────────────────────────────────────────
+  // 三轮实测已经确认：客户端底部栏是「固定 5 个 id 槽位」（0/1/2/21/4），
+  // 响应里缺哪个 id，它就拿本地默认内容补哪个槽 —— 所以「不写它」永远删不掉。
+  // 但 v1.1.0 证明「写进去什么就显示什么」（好物→好物·改）。
+  // 于是改成：5 个槽位全部保留、id / 顺序 / 所有计数一个都不动，
+  // 只把目标 Tab 的标题与图标换成空白（标题一个空格、图标指到 1×1 透明图）。
+  // 这样客户端没有任何「缺项」可以补，只能按我们给的空白内容画。
+  const TAB_BLANK = true;
+  const BLANK_TITLE = " ";
+  // 图标：直接给空字符串（不发图片请求 → 槽位没有图标）。
+  // 只用改脚本、不加仓库文件，所以不指向 assets/blank.png。
+  // 如果实测发现「空字符串被客户端兜底成默认图标」，把下面这行换成
+  //   "https://cdn.jsdelivr.net/gh/JackLhang/rewrite@main/assets/blank.png"
+  // 然后把 assets/blank.png（工作区已生成，70B 的 8×8 全透明 PNG）推到仓库即可。
+  const BLANK_ICON = "";
+  const ICON_FIELDS = [4, 5, 6, 7, 10, 11, 12, 13, 14, 15];
+  function blankTabItem(b, s, e) {
+    const fs = parse(b, s, e);
+    if (!fs) return null;
+    const ed = new Map();
+    for (const r of fs) {
+      if (r.w !== 2) continue;
+      if (r.f === 3) ed.set(r, lenField(3, utf8(BLANK_TITLE)));
+      else if (ICON_FIELDS.indexOf(r.f) >= 0) ed.set(r, lenField(r.f, utf8(BLANK_ICON)));
+    }
+    if (!ed.size) return null;
+    return rebuild(b, s, e, fs, ed);
+  }
   const TAB_PLANS = {
     a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "短视频", "好物"], wl: "0;2;4" },
     b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "VIP会员", "好物"], wl: "0;1;4" },
@@ -145,9 +181,22 @@
   // 广告 SDK 配置（gzip 内是整份广告配置 JSON，含 splashConfig.splashAdClose 等开关）
   const JCE_AD_SDK_CONFIG = 129513;
   // 在配置 JSON 里做同长度替换：false→true+空格 / true→false+空格，长度不变，JSON 依然合法
+  // 2026-11-13 实测：只有上面两个开关时，开屏照样弹过一次 —— 抓包里整轮没有任何
+  // splash 类 RPC 请求，说明那条广告是**早就预加载在本地**的创意（截图写着「已WIFI预加载」），
+  // 关总开关也拦不住已经落盘的素材。所以再补几刀：不合并长期广告、不预加载、不走 QUIC。
+  // 数值型替换会改变 JSON 长度，fixAdSdkConfig 会重算前面那个 4 字节长度，所以随便改。
   const SDK_PATCHES = [
     ['"splashAdClose":false', '"splashAdClose":true '],                       // 开屏广告总开关
-    ['"enableHotLaunchSplashAd":true', '"enableHotLaunchSplashAd":false  ']    // 热启动（切回前台）开屏
+    ['"enableHotLaunchSplashAd":true', '"enableHotLaunchSplashAd":false '],   // 热启动（切回前台）开屏
+    ['"isSupportMergeLongTermSplashAd":true', '"isSupportMergeLongTermSplashAd":false'], // 长期合并（本地囤素材）
+    ['"mergeLongTermSplashAdMaxSize":100', '"mergeLongTermSplashAdMaxSize":0'],
+    ['"isSupportOnlineSelectCPD":true', '"isSupportOnlineSelectCPD":false'],
+    ['"coldLaunchAdTotalTimeoutIntervalMS":1900', '"coldLaunchAdTotalTimeoutIntervalMS":0'],
+    ['"hotLaunchAdTotalTimeoutIntervalMS":1200', '"hotLaunchAdTotalTimeoutIntervalMS":0'],
+    ['"splashPreloadInterval":600', '"splashPreloadInterval":86400'],         // 预加载：10 分钟一次 → 一天一次
+    ['"splashPreloadRetryTimes":1', '"splashPreloadRetryTimes":0'],
+    ['"splashCpmMaxRetrytimes":3', '"splashCpmMaxRetrytimes":0'],
+    ['"isQuicNetworkFrame":true', '"isQuicNetworkFrame":false']                // 广告走 QUIC 会绕过 Loon
   ];
   // 开屏广告的 RPC 方法名每个版本都可能变（GetSplashPreload / GetSplashRealtimePoll / 以后别的名字），
   // 所以除了精确名单，再用关键词兜底：方法名里带 splash 的一律拦（splash 只用于开屏广告）。
@@ -538,6 +587,39 @@
       if (!nv1) return null;
       L("Tab", "改名测试：「" + hitTitle + "」→「" + hitTitle + RENAME_TXT + "」，Tab 数 " + items0.length + " 不变、版本号不动");
       return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nv1), b.subarray(v.e, x.e)]));
+    }
+    if (TAB_BLANK) {
+      const itemsB = vf.filter(r => r.f === 1 && r.w === 2), edsB = new Map(), hitsB = [], namesB = [];
+      for (const it of itemsB) {
+        const ik = parse(b, it.vs, it.e);
+        if (!ik) continue;
+        let key = "", title = "";
+        for (const r of ik) {
+          if (r.f === 3 && r.w === 2) title = text(b, r.vs, r.e) || "";
+          if (r.f === 22 && r.w === 2) {
+            const rk = parse(b, r.vs, r.e), k1 = rk && rk.find(z => z.f === 1 && z.w === 2);
+            if (k1) key = ascii(b, k1.vs, k1.e) || "";
+          }
+        }
+        namesB.push(title || key || "?");
+        if (TAB_PLAN.keys.indexOf(key) >= 0 || TAB_PLAN.titles.indexOf(title) >= 0) {
+          const nb = blankTabItem(b, it.vs, it.e);
+          if (nb) { edsB.set(it, lenField(1, nb)); hitsB.push(title || key); }
+        }
+      }
+      if (!hitsB.length) { L("Tab", "没匹配到要清空的项，当前是：" + namesB.join(" / ")); return null; }
+      const verB = vf.find(r => r.f === 4 && r.w === 2 && /^[0-9]{1,20}$/.test(ascii(b, r.vs, r.e) || ""));
+      let verTxtB = "", newVerB = "";
+      if (verB) {
+        verTxtB = ascii(b, verB.vs, verB.e) || "";
+        newVerB = nextVer(verTxtB);
+        edsB.set(verB, lenField(4, utf8(newVerB)));
+      }
+      const nvB = rebuild(b, v.vs, v.e, vf, edsB);
+      if (!nvB) return null;
+      L("Tab", "清空法：" + hitsB.join(" / ") + " 的标题与图标已清空；5 个槽位、id、顺序、计数全不动" +
+        (verTxtB ? "，版本 " + verTxtB + "→" + newVerB : ""));
+      return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nvB), b.subarray(v.e, x.e)]));
     }
     const items = vf.filter(r => r.f === 1 && r.w === 2), drop = new Set(), names = [];
     for (const it of items) {
@@ -1127,7 +1209,14 @@
   // ── 底部 Tab 删除开关（插件页可改，不用动代码）──────────────
   //   tabs=true/false       是否删除底部多余 Tab（false = 导航响应一字节不改）
   //   tabmode=a/b           删哪一组：a=删短剧+好物，b=删VIP会员+好物
-  let TAB_ON = true, TAB_PLAN = TAB_PLANS.a;
+  //
+  // PLAN_FORCE：强制方案，压过插件页的 tabvip 开关。null = 交回开关决定。
+  // 为什么现在锁成 "a"：你设备上存下来的 tabvip 是「开」（本轮日志打的就是
+  // 「方案 删VIP会员+好物」），而插件页里的开关值只有重装 .lpx 才会回到默认，
+  // 这轮只改脚本、不动插件，所以先在代码里把方案钉成 a（短剧+好物）。
+  // 以后想用开关，把这里改成 null 即可。
+  const PLAN_FORCE = "a";
+  let TAB_ON = true, TAB_PLAN = TAB_PLANS.a, PARAM_LINE = "";
   (function () {
     let a = null;
     try { if (typeof $argument !== "undefined") a = $argument; } catch (e) { a = null; }
@@ -1139,6 +1228,13 @@
     else if (m) L("参数", "tabmode=" + m + " 无法识别，改看 tabvip 开关");
     else if (argBool(a, ["tabvip", "tabb"], false)) TAB_PLAN = TAB_PLANS.b;
     if (TAB_TEST === "cut1") TAB_PLAN = TAB_PLANS.one;
+    if (PLAN_FORCE === "a") TAB_PLAN = TAB_PLANS.a;
+    else if (PLAN_FORCE === "b") TAB_PLAN = TAB_PLANS.b;
+    // 这里不能直接 L()：此时 RID 还没初始化，L 内部取 RID 会抛 TDZ 被静默吞掉。
+    // 先存起来，等真正处理响应时随「入口」一起打出来。
+    PARAM_LINE = "tabs=" + (TAB_ON ? "开" : "关") + " ｜ 方案=" + TAB_PLAN.desc +
+      (PLAN_FORCE ? "（代码强制，插件里的 tabvip 本轮不生效）" : "") +
+      " ｜ 做法=" + (TAB_BLANK ? "清空法（保留槽位，清空标题/图标）" : "删项法");
   })();
   let RID = "?", STAGE = "初始化";
   function L(stage, msg) {
@@ -1259,6 +1355,14 @@
     o.enableHdns = false;
     return JSON.stringify(o);
   }
+  // v1.2.0：AB 改写默认关闭。
+  // 证据：config.ab.qq.com/tab/GetTabRemoteConfig 返回的 14575B JSON 里只有
+  //   {"version","check_sum","scene_code","duration_hour":72,"switches":[{event,page,element,...}]}
+  // —— 全是**打点采样**配置，整份里没有任何 tab 开关；我们塞进去的 simple_mode_config
+  // 六轮实测一次都没让底部栏少过一个 Tab。而它带 check_sum，改内容/推版本号等于让
+  // 客户端校验不过，反而可能把整份 AB 配置丢掉（开屏突然出现就是在这之后）。
+  // 想再试就把它改成 true，并把 .lpx 里的 AB 规则加回来。
+  const AB_FIX = false;
   const AB_PATCH = {
     simple_mode_config: patchSimpleMode,
     ios_nx_netframework_compatible: patchNoQuic,
@@ -1267,6 +1371,7 @@
   };
   const AB_NEEDLES = [utf8(SIMPLE_KEY), utf8("ios_nx_netframework_compatible"), utf8("network_resolve_config")];
   function onAbConfig(raw) {
+    if (!AB_FIX) { L("AB", "AB 改写已在 v1.2.0 关闭（原因见 AB_FIX 注释），响应原样放行"); return null; }
     let u8 = raw, gz = false;
     if (gzMagic(u8)) { u8 = gunzip(u8); gz = true; L("AB", "配置解压后 " + btype(u8)); if (!u8) return null; }
     const top = parse(u8, 0, u8.length);
@@ -1343,6 +1448,7 @@
     RID = Date.now().toString(36).slice(-4) + (isResp ? "R" : "Q");
     STAGE = "入口";
     L("入口", (IS_QX ? "QX" : "Loon") + " " + (isResp ? "响应" : "请求") + " host=" + host + " diag=" + (DBG ? "on" : "off") + " url=" + (url.length > 80 ? url.slice(0, 80) + "…" : url));
+    if (PARAM_LINE) L("参数", PARAM_LINE);
     try {
       if (!isResp) {
         STAGE = "读取请求体";
