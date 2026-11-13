@@ -65,6 +65,13 @@
 //   客户端很可能拿它跟本地缓存比对，版本一样就整份不应用。
 //   所以这版一旦改了配置，就把 f2 换成「现在的 Unix 秒数」，保证比缓存新。
 //   同时把注入条目的内部结构对齐服务端实际格式（{f1:json, f4:key}，去掉臆造的 f2）。
+// v1.0.9（2026-11-13）—— 关键突破：客户端**确实**在用这条响应，只是慢一拍！
+//   用户实测：装了「只改标题」那版之后，又启动了一次，底部第一个 Tab 真的变成了「首页·改」。
+//   也就是说：客户端收到响应 → 先写本地缓存 → **下次启动**才用缓存重建底部栏。
+//   之前所有「删项」测试都是在同一次启动里看效果的，所以永远看不到变化；
+//   而删项那几版之所以没在「下次启动」显现，是因为那份 3 项列表被内核判为不合法直接没进缓存。
+//   于是这版改成最小改动、单变量：**只删「好物」一项**，其余（图标/顺序/计数/版本格式）全不动。
+//   验证方法：装好后启动两次 —— 第一次可能还显示旧缓存，第二次才反映新列表。
 // ============================================================
 
 (() => {
@@ -79,10 +86,13 @@
   const TAB_PROBE = false;
   const TAB_PROBE_TXT = "·改";
   // "title" = 只改标题不删项（单变量诊断）；"cut" = 正常删项
-  const TAB_TEST = "cut";
+  const TAB_TEST = "cut1";
   const TAB_PLANS = {
-    a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "短视频", "好物"] },
-    b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "VIP会员", "好物"] }
+    a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "短视频", "好物"], wl: "0;2;4" },
+    b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "VIP会员", "好物"], wl: "0;1;4" },
+    // 单变量诊断用：只删「好物」这一项，其它一切不动。
+    // 客户端是「收到后先存缓存、下次启动才应用」，所以每改一次要启动两次才看得出来。
+    one: { desc: "只删好物", keys: ["goods_entrance"], titles: ["好物"], wl: "0;1;2;4" }
   };
   // 本次响应里删掉了多少个 Tab、原来有几个（供页面级计数修正使用）
   let TAB_KEPT = 0, TAB_OLD = 0;
@@ -1069,6 +1079,7 @@
     else if (m === "a" || m === "short" || m === "smallvideo" || m === "1") TAB_PLAN = TAB_PLANS.a;
     else if (m) L("参数", "tabmode=" + m + " 无法识别，改看 tabvip 开关");
     else if (argBool(a, ["tabvip", "tabb"], false)) TAB_PLAN = TAB_PLANS.b;
+    if (TAB_TEST === "cut1") TAB_PLAN = TAB_PLANS.one;
   })();
   let RID = "?", STAGE = "初始化";
   function L(stage, msg) {
@@ -1144,7 +1155,7 @@
   // 顶层追加一个 f3 条目（{1:key, 2:{1:json, 2:11276, 4:key}}），protobuf 结构合法。
   // 顺带关掉 QUIC / 预解析：QUIC 走 UDP，Loon 抓不到也改不了，开着其它改写都会失效。
   const SIMPLE_KEY = "simple_mode_config";
-  function cutWhitelist() { return TAB_PLAN === TAB_PLANS.b ? "0;1;4" : "0;2;4"; }
+  function cutWhitelist() { return TAB_PLAN.wl || "0;2;4"; }
   function patchSimpleMode(js) {
     let o;
     try { o = JSON.parse(js); } catch (x) { return null; }
