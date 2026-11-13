@@ -55,6 +55,16 @@
 //     标题还是「首页」   → 客户端压根不采用这条响应渲染底部栏，
 //                          GetTabListRsp 这条线到此为止，改走 AB 开关 / 其它入口。
 //   AB 配置那条路（补 simple_mode_config）保持不变，继续一起验证。
+// 实测结果（09:56 那次）：响应 4590→4595B、「首页·改」确实回写给了客户端，
+// 底部第一个 Tab 仍然显示「首页」 —— 单变量测试给出的结论是明确的：
+//   **客户端根本不用这条响应渲染底部栏**（改个标题这么无害的改动都没反映）。
+//   所以 GetTabListRsp 这条线到此为止，改 Tab 回到删项（结构上没坏处），重点转向 AB 开关。
+// v1.0.8（2026-11-13）—— 让 AB 补丁「看起来像一次真的配置更新」：
+//   上一版注入 simple_mode_config 后 App 毫无反应，怀疑是版本号没变：
+//   config.ab.qq.com 响应的顶层 f2 是配置版本（本轮 1785915522，看着像时间戳），
+//   客户端很可能拿它跟本地缓存比对，版本一样就整份不应用。
+//   所以这版一旦改了配置，就把 f2 换成「现在的 Unix 秒数」，保证比缓存新。
+//   同时把注入条目的内部结构对齐服务端实际格式（{f1:json, f4:key}，去掉臆造的 f2）。
 // ============================================================
 
 (() => {
@@ -66,10 +76,10 @@
   //   变了 = 客户端确实在用这条响应（那就只是结构细节没对上）；
   //   没变 = 底部栏根本不来自这条响应，别再在 GetTabListRsp 上耗时间。
   // 排查完把 TAB_PROBE 改成 false 即可恢复原样。
-  const TAB_PROBE = true;
+  const TAB_PROBE = false;
   const TAB_PROBE_TXT = "·改";
   // "title" = 只改标题不删项（单变量诊断）；"cut" = 正常删项
-  const TAB_TEST = "title";
+  const TAB_TEST = "cut";
   const TAB_PLANS = {
     a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "短视频", "好物"] },
     b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "VIP会员", "好物"] }
@@ -1155,8 +1165,9 @@
       feature_config: { enable: 1, tab_bar_cut_enable: 1, tab_bar_cut_whitelist: cutWhitelist() },
     });
   }
+  // 服务端条目格式实测为 {f1:key, f2:{f1:json, f4:key}}，这里照抄，不额外塞字段
   function simpleModeEntry() {
-    const v = concat([lenField(1, utf8(simpleModeJson())), ev(16), ev(11276), lenField(4, utf8(SIMPLE_KEY))]);
+    const v = concat([lenField(1, utf8(simpleModeJson())), lenField(4, utf8(SIMPLE_KEY))]);
     return concat([lenField(1, utf8(SIMPLE_KEY)), lenField(2, v)]);
   }
   function patchNoQuic(js) {
@@ -1220,6 +1231,18 @@
       L("AB", "下发里没有 " + SIMPLE_KEY + "，已补一条：tab_bar_cut_enable=1 whitelist=" + cutWhitelist() + "，" + u8.length + "→" + out.length + "B");
     }
     if (!out) { L("AB", "没有可补丁的条目，放行 " + u8.length + "B"); return null; }
+    // 顶层 f2 = 配置版本（时间戳）。客户端很可能拿它跟本地缓存比对，
+    // 版本没变就整份不应用 —— 所以改过内容就一定把版本推到「现在」。
+    const to2 = parse(out, 0, out.length);
+    const ver = to2 && to2.find(x => x.f === 2 && x.w === 0);
+    if (ver) {
+      const now = Math.floor(Date.now() / 1000);
+      const nv = now > ver.v ? now : ver.v + 1;
+      const ve = new Map();
+      ve.set(ver, concat([ev(16), ev(nv)]));
+      const bumped = rebuild(out, 0, out.length, to2, ve);
+      if (bumped) { L("AB", "配置版本 " + ver.v + "→" + nv); out = bumped; }
+    }
     return gz ? gzip(out) : out;
   }
 
