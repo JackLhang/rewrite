@@ -72,6 +72,11 @@
 //   而删项那几版之所以没在「下次启动」显现，是因为那份 3 项列表被内核判为不合法直接没进缓存。
 //   于是这版改成最小改动、单变量：**只删「好物」一项**，其余（图标/顺序/计数/版本格式）全不动。
 //   验证方法：装好后启动两次 —— 第一次可能还显示旧缓存，第二次才反映新列表。
+// v1.1.0（2026-11-13）—— 实测结果：4 项列表**被接受了**（「首页·改」变回「首页」证明新响应进了缓存），
+//   但「好物」照旧显示。结论：客户端按固定 5 个 id（0/1/2/21/4）建底部栏，
+//   响应里缺了哪个 id，它就用本地默认内容补上 —— 所以「靠不写它来实现删除」行不通。
+//   这一版只做一件事：给「好物」改名（好物→好物·改），验证「标题/图标等内容是否由服务端控制」。
+//   插件页新增 rename 开关，关掉它就会走正常的删项逻辑（tabs/tabvip 两个开关仍然有效）。
 // ============================================================
 
 (() => {
@@ -85,8 +90,12 @@
   // 排查完把 TAB_PROBE 改成 false 即可恢复原样。
   const TAB_PROBE = false;
   const TAB_PROBE_TXT = "·改";
-  // "title" = 只改标题不删项（单变量诊断）；"cut" = 正常删项
-  const TAB_TEST = "cut1";
+  // 诊断开关：开了就只给「好物」改名（不删项），用来判断标题是不是服务端说了算。
+  // 插件页 [Argument] 的 rename 开关可以直接切换，默认开。
+  let RENAME_ON = true;
+  const RENAME_TXT = "·改";
+  // "cut" = 正常删项（受插件页「删除底部Tab」开关控制）
+  const TAB_TEST = "cut";
   const TAB_PLANS = {
     a: { desc: "删短剧+好物", keys: ["smallvideo_entrance", "goods_entrance"], titles: ["短剧", "短视频", "好物"], wl: "0;2;4" },
     b: { desc: "删VIP会员+好物", keys: ["vip_entrance", "goods_entrance"], titles: ["会员专区", "VIP会员", "好物"], wl: "0;1;4" },
@@ -487,25 +496,40 @@
     if (!v) return null;
     const vf = parse(b, v.vs, v.e);
     if (!vf) return null;
-    if (TAB_TEST === "title") {
-      // 单变量诊断：不删任何项，只改第一个 Tab 的标题
+    if (RENAME_ON) {
+      // 诊断：只改「好物」这一项的标题，不删项、不动顺序、不动版本号。
+      // 目的：确认「每一项的标题/内容」是不是服务端说了算。
+      //   变了 → 内容由服务端控制，删不掉是「客户端按固定 id 补位」，下一步改 id / 清空内容试；
+      //   没变 → 连标题都不看服务端，这条路彻底死，只能靠 AB 开关。
       const items0 = vf.filter(r => r.f === 1 && r.w === 2);
-      const it0 = items0[0];
-      if (!it0) return null;
-      const sub0 = parse(b, it0.vs, it0.e);
-      const t0 = sub0 && sub0.find(r => r.f === 3 && r.w === 2);
-      const cur0 = t0 ? text(b, t0.vs, t0.e) : null;
-      if (!cur0) return null;
-      const e0 = new Map();
-      e0.set(t0, lenField(3, utf8(cur0 + TAB_PROBE_TXT)));
-      const ni0 = rebuild(b, it0.vs, it0.e, sub0, e0);
-      if (!ni0) return null;
-      const vf0 = new Map();
-      vf0.set(it0, lenField(1, ni0));
-      const nv0 = rebuild(b, v.vs, v.e, vf, vf0);
-      if (!nv0) return null;
-      L("Tab", "测试模式(只改标题)：第一个 Tab「" + cur0 + "」→「" + cur0 + TAB_PROBE_TXT + "」，Tab 数仍为 " + items0.length + "，版本号不动");
-      return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nv0), b.subarray(v.e, x.e)]));
+      let hit = null, hitTitle = "";
+      for (const it of items0) {
+        const ik = parse(b, it.vs, it.e);
+        if (!ik) continue;
+        let title = "", key = "";
+        for (const r of ik) {
+          if (r.f === 3 && r.w === 2) title = text(b, r.vs, r.e) || "";
+          if (r.f === 22 && r.w === 2) {
+            const rk = parse(b, r.vs, r.e), k1 = rk && rk.find(z => z.f === 1 && z.w === 2);
+            if (k1) key = ascii(b, k1.vs, k1.e) || "";
+          }
+        }
+        if (key === "goods_entrance" || title === "好物") { hit = it; hitTitle = title; break; }
+      }
+      if (!hit) { L("Tab", "没找到「好物」这一项，改名跳过"); return null; }
+      const sub1 = parse(b, hit.vs, hit.e);
+      const t1 = sub1 && sub1.find(r => r.f === 3 && r.w === 2);
+      if (!t1) return null;
+      const e1 = new Map();
+      e1.set(t1, lenField(3, utf8(hitTitle + RENAME_TXT)));
+      const ni1 = rebuild(b, hit.vs, hit.e, sub1, e1);
+      if (!ni1) return null;
+      const vf1 = new Map();
+      vf1.set(hit, lenField(1, ni1));
+      const nv1 = rebuild(b, v.vs, v.e, vf, vf1);
+      if (!nv1) return null;
+      L("Tab", "改名测试：「" + hitTitle + "」→「" + hitTitle + RENAME_TXT + "」，Tab 数 " + items0.length + " 不变、版本号不动");
+      return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nv1), b.subarray(v.e, x.e)]));
     }
     const items = vf.filter(r => r.f === 1 && r.w === 2), drop = new Set(), names = [];
     for (const it of items) {
@@ -1080,6 +1104,7 @@
     else if (m) L("参数", "tabmode=" + m + " 无法识别，改看 tabvip 开关");
     else if (argBool(a, ["tabvip", "tabb"], false)) TAB_PLAN = TAB_PLANS.b;
     if (TAB_TEST === "cut1") TAB_PLAN = TAB_PLANS.one;
+    RENAME_ON = argBool(a, ["rename", "renametest", "probe"], true);
   })();
   let RID = "?", STAGE = "初始化";
   function L(stage, msg) {
