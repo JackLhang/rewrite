@@ -76,7 +76,15 @@
 //   但「好物」照旧显示。结论：客户端按固定 5 个 id（0/1/2/21/4）建底部栏，
 //   响应里缺了哪个 id，它就用本地默认内容补上 —— 所以「靠不写它来实现删除」行不通。
 //   这一版只做一件事：给「好物」改名（好物→好物·改），验证「标题/图标等内容是否由服务端控制」。
-//   插件页新增 rename 开关，关掉它就会走正常的删项逻辑（tabs/tabvip 两个开关仍然有效）。
+//   实测（14:17 日志 + 截图）：底部第 4 个 Tab 真的显示成「好物·改」——
+//   所以每一项的标题/图标确实由服务端这份列表决定，删不掉的锅在「槽位数量」上。
+// v1.1.1（2026-11-13）—— 按你的要求删「好物 + 短剧」，并把页面的 Tab 计数一起改：
+//   客户端按固定 id 建槽位，缺 id 就用本地默认补。上一轮我们只把列表删成 3 项，
+//   但页面级 sdk_page_ctx 里还写着 "page_size":5 —— 这次把它同步成 3，
+//   让「列表项数」和「页面声明的项数」一致，看客户端是不是按这个数字建槽位。
+//   （v1.0.5 曾改过一次 page_size，但那时还不知道「客户端慢一拍」，
+//     测试方法本身是错的，等于没测过。）
+//   rename 诊断改回内部常量（默认关），插件页恢复三个开关。
 // ============================================================
 
 (() => {
@@ -90,9 +98,9 @@
   // 排查完把 TAB_PROBE 改成 false 即可恢复原样。
   const TAB_PROBE = false;
   const TAB_PROBE_TXT = "·改";
-  // 诊断开关：开了就只给「好物」改名（不删项），用来判断标题是不是服务端说了算。
-  // 插件页 [Argument] 的 rename 开关可以直接切换，默认开。
-  let RENAME_ON = true;
+  // 诊断开关（已出结论：标题确实由服务端控制，见 v1.1.0 实测），默认关。
+  // 需要再用：把 RENAME_TEST 改成 true，就只给「好物」改名、不删项。
+  const RENAME_TEST = false;
   const RENAME_TXT = "·改";
   // "cut" = 正常删项（受插件页「删除底部Tab」开关控制）
   const TAB_TEST = "cut";
@@ -496,7 +504,7 @@
     if (!v) return null;
     const vf = parse(b, v.vs, v.e);
     if (!vf) return null;
-    if (RENAME_ON) {
+    if (RENAME_TEST) {
       // 诊断：只改「好物」这一项的标题，不删项、不动顺序、不动版本号。
       // 目的：确认「每一项的标题/内容」是不是服务端说了算。
       //   变了 → 内容由服务端控制，删不掉是「客户端按固定 id 补位」，下一步改 id / 清空内容试；
@@ -645,6 +653,32 @@
     if (!fs.some(x => x.f === 2 && x.w === 0) && idx > 0) out = concat([ev(16), ev(idx), out]);
     return out;
   }
+  // 页面级计数：sdk_page_ctx = {"page_offset":1,"page_size":5,"used_module_num":7}。
+  // 底部导航这条响应里 page_size 恰好等于 Tab 个数（5）。删完 Tab 后不同步它，
+  // 客户端可能仍按 5 个槽位布局、把缺的 id 用本地默认补回来（v1.0.9 的现象）。
+  // 所以这里把 page_size 改成实际剩下的个数；used_module_num / _ctrl_showed_module_num
+  // 先不动（它们不是 Tab 个数，动多了出了问题不好定位）。
+  function fixPageSize(body, kept, old) {
+    const top = parse(body, 0, body.length);
+    if (!top) return body;
+    const edits = new Map();
+    for (const x of top) {
+      if (x.f !== 3 || x.w !== 2) continue;
+      const ef = parse(body, x.vs, x.e);
+      if (!ef) continue;
+      const k = ef.find(z => z.f === 1 && z.w === 2), v = ef.find(z => z.f === 2 && z.w === 2);
+      if (!k || !v || ascii(body, k.vs, k.e) !== "sdk_page_ctx") continue;
+      const js = text(body, v.vs, v.e);
+      if (!js || js.indexOf('"page_size":' + old) < 0) continue;
+      const nj = js.replace('"page_size":' + old, '"page_size":' + kept);
+      const ve = new Map();
+      ve.set(v, lenField(2, utf8(nj)));
+      edits.set(x, lenField(3, rebuild(body, x.vs, x.e, ef, ve)));
+      L("Tab", "sdk_page_ctx.page_size " + old + "→" + kept);
+    }
+    if (!edits.size) return body;
+    return rebuild(body, 0, body.length, top, edits) || body;
+  }
   function clean(b, s, e, depth) {
     if (depth > 48 || !has(null, s, e)) return null;
     const fs = parse(b, s, e);
@@ -753,6 +787,7 @@
     L("i.video", "tRPC 帧 OK：头 " + fr.he + "B / 体 " + (u8.length - fr.he) + "B");
     TAB_KEPT = 0; TAB_OLD = 0;
     let body = transform(u8, fr.he, u8.length);
+    if (body && TAB_KEPT && TAB_KEPT !== TAB_OLD) body = fixPageSize(body, TAB_KEPT, TAB_OLD);
     if (!body) {
       L("i.video", has(null, fr.he, u8.length) ? "包内有广告标记但没命中删除规则（可能是未覆盖的新结构）" : "解析完成，未命中广告元素，放行");
       return null;
@@ -1104,7 +1139,6 @@
     else if (m) L("参数", "tabmode=" + m + " 无法识别，改看 tabvip 开关");
     else if (argBool(a, ["tabvip", "tabb"], false)) TAB_PLAN = TAB_PLANS.b;
     if (TAB_TEST === "cut1") TAB_PLAN = TAB_PLANS.one;
-    RENAME_ON = argBool(a, ["rename", "renametest", "probe"], true);
   })();
   let RID = "?", STAGE = "初始化";
   function L(stage, msg) {

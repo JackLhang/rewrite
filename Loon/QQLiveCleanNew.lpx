@@ -5,28 +5,32 @@
 #!tag=去广告
 #!system=ios
 #!loon_version=3.5.1(983)
-#!date=2026-11-13 13:33:30
-#!desc=去开屏广告、前贴/中插、暂停广告，去掉「我的」页广告；底部 Tab 精简见插件页四个开关
+#!date=2026-11-13 14:29:36
+#!desc=去开屏广告、前贴/中插、暂停广告，去掉「我的」页广告；底部 Tab 精简见插件页三个开关
 
 # ─────────────────────────────────────────────────────────────
-# v1.1.0（2026-11-13）—— 定位到「好物」删不掉的原因，本版做改名验证
+# v1.1.1（2026-11-13）—— 按需求删「好物 + 短剧」，并把页面 Tab 计数一起改
 #
-# 上一轮的实验结论（很关键）：
-# 装 v1.0.9 后启动两次，第一个 Tab 从「首页·改」变回了「首页」——
-# 说明客户端**确实采纳了我们改写的导航列表**（新列表进了它的本地缓存）。
-# 但「好物」照旧在，说明它不是按「响应里有几项就画几个」来的。
+# 已经实证的事实（三轮实测，按时间顺序）：
+# ① 装 v1.0.9（只删「好物」）启动两次后，第一个 Tab 从「首页·改」变回「首页」
+# → 客户端**确实采纳了我们改写的导航列表**，新列表进了它的本地缓存。
+# 但「好物」照旧在 → 缺项会被本地默认内容补回来。
+# ② 装 v1.1.0（只把「好物」改名「好物·改」，一个字节都不删）启动两次后，
+# 底部第 4 个 Tab 真的显示成「好物·改」→ **每一项的标题/图标确实由服务端这份列表决定**。
+# 结论：内容完全可控，唯一没打通的只是「槽位数量」。
 #
-# 判定原因：客户端底部栏是按**固定 id 集合**（首页 0 / 短剧 1 / 会员专区 2 /
-# 好物 21 / 个人中心 4）建 5 个槽位，响应里缺哪个 id，它就用本地默认内容补上那个槽。
-# 所以「不写它就等于删掉它」这条路不成立。
+# 本版改动（针对「数量」这唯一变量）：
+# 1) 删「短剧 + 好物」，保留 首页 / 会员专区 / 个人中心（3 个）；
+# 2) 页面级 sdk_page_ctx 里的 "page_size":5 同步改成 3 —— 让「列表项数」
+# 和「页面声明的项数」一致。上一轮只删项不改这个数字，客户端可能仍按 5 个槽位布局。
+# （v1.0.5 曾经改过一次 page_size，但那时还不知道「客户端慢一拍」，
+# 测试方法本身是错的，等于没测过，所以这次算第一次真正验证。）
+# 3) used_module_num / _ctrl_showed_module_num 一律不动（它们不是 Tab 个数，
+# 多改一处，出问题就不好定位）；
+# 4) 「好物·改」的概率诊断改回脚本内部常量（默认关），插件页恢复三个开关。
 #
-# 本版改动：
-# 1) 新增 rename 开关（默认开）：只把「好物」改名为「好物·改」，不删任何项、
-# 不动顺序、不动版本号 —— 用来确认「标题/图标这些内容是不是服务端说了算」；
-# 2) 关掉 rename 就恢复正常的删项逻辑（tabs 总开关 + tabvip 方案开关）；
-# 3) AB 配置补 simple_mode_config（tab_bar_cut_enable + 白名单 + 版本号推进）继续保留。
-#
-# ⚠️ 装好后**要启动两次**：客户端收到响应先写本地缓存，下一次启动才用它重建底部栏。
+# ⚠️ 装好后**必须启动两次**才看结果：
+# 第一次启动 = 客户端把新列表写进本地缓存；第二次启动 = 用它重建底部栏。
 #
 # ★★ 更新脚本后必须刷一次 CDN，否则 Loon 还会拿到旧脚本 ★★
 # 浏览器打开一次，看到 "status": "finished" 就行：
@@ -38,9 +42,8 @@
 
 [Argument]
 diag = switch,true,tag=诊断日志,desc=打开后在 Loon 日志里输出 txvideo-ad-clean 流水（排查用）
-rename = switch,true,tag=【诊断】改「好物」标题,desc=开=只把「好物」改名成「好物·改」，不删任何 Tab；关=按下面两个开关正常删 Tab
-tabs = switch,true,tag=删除底部多余Tab,desc=关闭后底部导航保持原样（5 个 Tab），不影响其它去广告功能
-tabvip = switch,false,tag=Tab方案B(删VIP会员),desc=开=删「VIP会员/好物」保留短视频；关=删「短剧/好物」保留会员专区
+tabs = switch,true,tag=删除底部多余Tab,desc=关=底部导航保持原样（5 个 Tab），不影响其它去广告功能
+tabvip = switch,false,tag=Tab方案B(删VIP会员),desc=开=删「会员专区/好物」保留短剧；关=删「短剧/好物」保留会员专区
 
 [Rule]
 DOMAIN,iacc.stgw.qq.com,REJECT
@@ -48,15 +51,15 @@ DOMAIN,tacc.video.qq.com,REJECT
 
 [Script]
 # i.video.qq.com 请求侧：拦截开屏、贴片、信息流等广告 RPC
-request if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(\?.*)?$/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${rename},${tabs},${tabvip}}) with tag="腾讯视频-广告请求", timeout=8, requires_body=true, binary_body_mode=true
+request if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(\?.*)?$/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-广告请求", timeout=8, requires_body=true, binary_body_mode=true
 # i.video.qq.com 响应侧：清理 protobuf(tRPC) 内的广告元素与底部 Tab
-response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(\?.*)?$/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${rename},${tabs},${tabvip}}) with tag="腾讯视频-播放页", timeout=8, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/i\.video\.qq\.com\/(\?.*)?$/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-播放页", timeout=8, requires_body=true, binary_body_mode=true
 # iacc.qq.com：JCE 二进制，处理播放提示、贴片广告、暂停广告、青少年弹窗
-response if ${url} ~= /^https?:\/\/iacc\.qq\.com\/(\?.*)?$/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${rename},${tabs},${tabvip}}) with tag="腾讯视频-JCE", timeout=8, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/iacc\.qq\.com\/(\?.*)?$/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-JCE", timeout=8, requires_body=true, binary_body_mode=true
 # config.ab.qq.com：AB 配置，补 simple_mode_config（底部 Tab 裁剪开关）
-response if ${url} ~= /^https?:\/\/config\.ab\.qq\.com\/tab\/GetTabRemoteConfig/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${rename},${tabs},${tabvip}}) with tag="腾讯视频-AB配置", timeout=8, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/config\.ab\.qq\.com\/tab\/GetTabRemoteConfig/ then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-AB配置", timeout=8, requires_body=true, binary_body_mode=true
 # rdelivery.qq.com：SDK 灰度，关掉 tab_gray
-response if ${url} ~= /^https?:\/\/rdelivery\.qq\.com\// then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${rename},${tabs},${tabvip}}) with tag="腾讯视频-SDK灰度", timeout=8, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https?:\/\/rdelivery\.qq\.com\// then script("https://raw.githubusercontent.com/JackLhang/rewrite/refs/heads/main/script/QQLiveCleanNew.js", {${diag},${tabs},${tabvip}}) with tag="腾讯视频-SDK灰度", timeout=8, requires_body=true, binary_body_mode=true
 
 [MITM]
 hostname = i.video.qq.com, iacc.qq.com, config.ab.qq.com, rdelivery.qq.com
