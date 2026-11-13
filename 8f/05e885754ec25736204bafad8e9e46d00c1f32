@@ -1,0 +1,16 @@
+script/QQLiveCleanNew.js
+  h_ae199c2e021e7b 79-87,101-103,507,656-681,790
+Loon/QQLiveCleanNew.lpx
+  h_ae199c2e021e7b 8-9,12,14-20,22-30,32-33,45-46,54,56,58,60,62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8f05e885754ec25736204bafad8e9e46d00c1f32",
+  "prompts": {},
+  "humans": {
+    "h_ae199c2e021e7b": {
+      "author": "LQAD\\hlliu1 <hlliu1@leqee.com>"
+    }
+  }
+}
