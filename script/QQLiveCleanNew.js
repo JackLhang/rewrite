@@ -12,6 +12,12 @@
 //   i.video.qq.com        请求：拦截广告 RPC 调用
 //   iacc.qq.com           JCE 二进制响应：播放提示、贴片广告、暂停广告、青少年弹窗
 //
+// v1.2.2（2026-11-13）—— 抓「客户端重发 getNaviPage」这条线索：
+//   对比三轮日志：v1.1.0（只改标题、不动版本号）底部栏只请求 1 次 → 客户端接受了；
+//   v1.1.1（删项+推版本号）30 次、v1.2.1（空标题+空图标+推版本号）19 次
+//   → 客户端认为「这页数据不合法」在疯狂重试，最后仍用本地默认项。
+//   所以这版把两个「可能不合法」的点都换掉：标题=零宽空格（非空白字符、渲染无宽度）、
+//   图标=非空 URL（1×1 透明图），并且**不再推进版本号**。
 // v1.2.1（2026-11-13）—— 只改脚本、不动插件、不加仓库文件：
 //   1) 方案用代码强制成 a（清空「短剧+好物」）。原因：插件页 tabvip 存下来的是「开」
 //      （本轮日志打的就是「方案 删VIP会员+好物」，所以短剧一直保留），
@@ -120,13 +126,18 @@
   // 只把目标 Tab 的标题与图标换成空白（标题一个空格、图标指到 1×1 透明图）。
   // 这样客户端没有任何「缺项」可以补，只能按我们给的空白内容画。
   const TAB_BLANK = true;
-  const BLANK_TITLE = " ";
-  // 图标：直接给空字符串（不发图片请求 → 槽位没有图标）。
-  // 只用改脚本、不加仓库文件，所以不指向 assets/blank.png。
-  // 如果实测发现「空字符串被客户端兜底成默认图标」，把下面这行换成
-  //   "https://cdn.jsdelivr.net/gh/JackLhang/rewrite@main/assets/blank.png"
-  // 然后把 assets/blank.png（工作区已生成，70B 的 8×8 全透明 PNG）推到仓库即可。
-  const BLANK_ICON = "";
+  // v1.2.2：v1.2.1 用「空格 + 空字符串图标」，客户端不认（原因见下），于是改成
+  // 「非空但看不见」：
+  //   · 标题用零宽空格 U+200B —— 不是空白字符，trim 不掉，但渲染出来没有宽度；
+  //   · 图标给一条**非空**的 URL（1×1 透明图；仓库里没有这张图就是 404 → 也没有图标）。
+  //   · 关键：**不动版本号**。v1.1.0 只改标题、不动版本号那次客户端是接受的（底部栏
+  //     只发了 1 次 getNaviPage）；而 v1.1.1 删项、v1.2.1 清空这两次都撞上
+  //     19~30 次疯狂重发 getNaviPage —— 那是客户端判定「这页数据不合法」在重试，
+  //     重试到最后就用本地缓存/默认项，所以我们改什么都白改。
+  const BLANK_TITLE = "\u200b";
+  const BLANK_ICON = "https://cdn.jsdelivr.net/gh/JackLhang/rewrite@main/assets/blank.png";
+  // 是否在改写后推进版本号（f4）。false = 和 v1.1.0 那次被接受的改名完全对齐。
+  const TAB_BUMP_VER = false;
   const ICON_FIELDS = [4, 5, 6, 7, 10, 11, 12, 13, 14, 15];
   function blankTabItem(b, s, e) {
     const fs = parse(b, s, e);
@@ -608,7 +619,7 @@
         }
       }
       if (!hitsB.length) { L("Tab", "没匹配到要清空的项，当前是：" + namesB.join(" / ")); return null; }
-      const verB = vf.find(r => r.f === 4 && r.w === 2 && /^[0-9]{1,20}$/.test(ascii(b, r.vs, r.e) || ""));
+      const verB = TAB_BUMP_VER ? vf.find(r => r.f === 4 && r.w === 2 && /^[0-9]{1,20}$/.test(ascii(b, r.vs, r.e) || "")) : null;
       let verTxtB = "", newVerB = "";
       if (verB) {
         verTxtB = ascii(b, verB.vs, verB.e) || "";
@@ -617,8 +628,8 @@
       }
       const nvB = rebuild(b, v.vs, v.e, vf, edsB);
       if (!nvB) return null;
-      L("Tab", "清空法：" + hitsB.join(" / ") + " 的标题与图标已清空；5 个槽位、id、顺序、计数全不动" +
-        (verTxtB ? "，版本 " + verTxtB + "→" + newVerB : ""));
+      L("Tab", "清空法：" + hitsB.join(" / ") + " 的标题(零宽空格)与图标(透明图)已替换；5 个槽位、id、顺序、计数全不动" +
+        (verTxtB ? "，版本 " + verTxtB + "→" + newVerB : "，版本号不动"));
       return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nvB), b.subarray(v.e, x.e)]));
     }
     const items = vf.filter(r => r.f === 1 && r.w === 2), drop = new Set(), names = [];
