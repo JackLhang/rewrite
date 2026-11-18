@@ -12,6 +12,19 @@
 //   i.video.qq.com        请求：拦截广告 RPC 调用
 //   iacc.qq.com           JCE 二进制响应：播放提示、贴片广告、暂停广告、青少年弹窗
 //
+// v1.2.3（2026-11-18）—— 新增「顶部购物车入口」清理（与 Tab 裁剪相互独立）：
+//   结构：它不是独立图标，而是首页筛选条模块 mod_category_fliter 的 item_idx=0，分两段
+//     f7 入口 314B（url 带 tabIndex%3D21 + from_ele%3Deid%253Dfilter_ecom_icon，icon_name=vmall）
+//     f8 元数据 97B（filter_icon / item_idx:0 / mod_id:mod_category_fliter / ztid:100101）
+//   它的跳转目标就是 tabIndex=21（好物 Tab），所以删「好物」后它必然悬空——这是
+//   「Tab 删了、右上角购物车还在」的根因，而不是 Tab 校验没生效。
+//   注意：同模块里搜索框 f2 的 url 也带 from_ele=eid=filter_ecom_icon（同一条 275B 串），
+//   只按「含 filter_ecom_icon」删会连搜索框一起干掉；判据必须加 icon_name=vmall 且
+//   自身不含 filter_icon 元数据，才能唯一锁定 314B 那条。
+//   实测（b_41507）：drop 41507→41096B（-411B，含元数据）、blank 41507→40950B（-557B）；
+//   顶层 14 字段不变、tRPC 头 191B 除总长外逐字节一致、首页/ChannelId=100101 计数不变。
+//   全量 64 样本回归：62 放行、b_3767 与原脚本逐字节相同（零副作用）。
+//   模式：CART_MODE = "drop"（删入口+元数据）| "blank"（只清跳转串，布局不动）
 // v1.2.2（2026-11-13）—— 抓「客户端重发 getNaviPage」这条线索：
 //   对比三轮日志：v1.1.0（只改标题、不动版本号）底部栏只请求 1 次 → 客户端接受了；
 //   v1.1.1（删项+推版本号）30 次、v1.2.1（空标题+空图标+推版本号）19 次
@@ -833,6 +846,57 @@
     return rebuild(b, s, e, fs, edits);
   }
   const PC_PAGE = utf8("personal_center_page"), AD_FEED = utf8("pb.AdFeed");
+  // ===== 顶栏「购物车」/ 好物筛选入口（eid=filter_ecom_icon）=====
+  // 结构事实（b_41507 实测）：它是模块 mod_category_fliter 的 item_idx=0，分两段：
+  //   入口段 f7 = { f1: { f1: 2973, f2: { f1: { f1: "txvideo://…tabIndex=21&from_ele=eid=filter_ecom_icon…" } } },
+  //                  f3: { f2: { f1:"icon_name", f2:"vmall" } } }
+  //   元数据段 f8 = { f1:"filter_icon", f2:[{icon_name:vmall},{item_idx:0},{mod_id:mod_category_fliter},{ztid:100101}] }
+  // 跳转目标就是 tabIndex=21（好物 tab），所以好物 tab 删掉后它必然悬空。
+  // 注意：同模块里搜索框 f2 的 url 也带 from_ele=eid=filter_ecom_icon，不能一起删。
+  const CART_EID = utf8("filter_ecom_icon");
+  const CART_MOD = utf8("mod_category_fliter");
+  const CART_ICON = utf8("vmall");
+  const CART_META = utf8("filter_icon");
+  const CART_URL = utf8("txvideo://");
+  const CART_MODE = "drop"; // "drop"=删入口+元数据 | "blank"=只把跳转链接清空
+
+  function cartEdit(b, s, e, depth) {
+    if (depth > 48) return null;
+    const fs = parse(b, s, e);
+    if (!fs) return null;
+    const edits = new Map();
+    // 入口段：整条就是「eid=filter_ecom_icon + icon_name=vmall」，自己不带 filter_icon 元数据
+    const entry = fs.find(x => x.w === 2 && (x.e - x.s) < 4096
+      && find(b, CART_EID, x.vs, x.e) >= 0
+      && find(b, CART_ICON, x.vs, x.e) >= 0
+      && find(b, CART_META, x.vs, x.e) < 0);
+    for (let i = 0; i < fs.length; i++) {
+      const x = fs[i];
+      if (x.w !== 2) continue;
+      if (entry && x === entry && CART_MODE === "drop") {
+        L("购物车", "删除入口条目 f=" + x.f + " " + (x.e - x.s) + "B");
+        edits.set(x, DROP);
+        continue;
+      }
+      // 只删「紧跟入口的那条」元数据（item_idx=0 的描述），同层其它 item 不动
+      if (entry && CART_MODE === "drop" && x !== entry && (x.e - x.s) < 512
+          && find(b, CART_META, x.vs, x.e) >= 0 && find(b, CART_MOD, x.vs, x.e) >= 0
+          && fs[i - 1] === entry) {
+        L("购物车", "删除元数据条目 f=" + x.f + " " + (x.e - x.s) + "B");
+        edits.set(x, DROP);
+        continue;
+      }
+      if (CART_MODE === "blank" && (x.e - x.s) < 4096
+          && find(b, CART_EID, x.vs, x.e) >= 0 && find(b, CART_URL, x.vs, x.e) === x.vs) {
+        L("购物车", "清空跳转链接 " + (x.e - x.vs) + "B");
+        edits.set(x, lenField(x.f, new Uint8Array(0)));
+        continue;
+      }
+      const r = cartEdit(b, x.vs, x.e, depth + 1);
+      if (r) edits.set(x, lenField(x.f, r));
+    }
+    return rebuild(b, s, e, fs, edits);
+  }
   function transform(b, s, e) {
     const top = parse(b, s, e);
     if (!top) return null;
@@ -862,6 +926,13 @@
       const c = clean(ui, 0, ui.length, 0);
       L("我的页", "入口已删除 " + (e - s) + "→" + (c ? c.length : ui.length) + "B");
       return c || ui;
+    }
+    const cart = cartEdit(b, s, e, 0);
+    if (cart) {
+      indexMarkers(cart, 0, cart.length);
+      const c = clean(cart, 0, cart.length, 0);
+      L("购物车", "已处理 " + (e - s) + "→" + cart.length + "B（mode=" + CART_MODE + "）");
+      return c || cart;
     }
     return clean(b, s, e, 0);
   }
