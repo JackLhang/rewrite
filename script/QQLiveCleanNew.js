@@ -12,19 +12,17 @@
 //   i.video.qq.com        请求：拦截广告 RPC 调用
 //   iacc.qq.com           JCE 二进制响应：播放提示、贴片广告、暂停广告、青少年弹窗
 //
-// v1.2.3（2026-11-18）—— 新增「顶部购物车入口」清理（与 Tab 裁剪相互独立）：
-//   结构：它不是独立图标，而是首页筛选条模块 mod_category_fliter 的 item_idx=0，分两段
-//     f7 入口 314B（url 带 tabIndex%3D21 + from_ele%3Deid%253Dfilter_ecom_icon，icon_name=vmall）
-//     f8 元数据 97B（filter_icon / item_idx:0 / mod_id:mod_category_fliter / ztid:100101）
-//   它的跳转目标就是 tabIndex=21（好物 Tab），所以删「好物」后它必然悬空——这是
-//   「Tab 删了、右上角购物车还在」的根因，而不是 Tab 校验没生效。
-//   注意：同模块里搜索框 f2 的 url 也带 from_ele=eid=filter_ecom_icon（同一条 275B 串），
-//   只按「含 filter_ecom_icon」删会连搜索框一起干掉；判据必须加 icon_name=vmall 且
-//   自身不含 filter_icon 元数据，才能唯一锁定 314B 那条。
-//   实测（b_41507）：drop 41507→41096B（-411B，含元数据）、blank 41507→40950B（-557B）；
-//   顶层 14 字段不变、tRPC 头 191B 除总长外逐字节一致、首页/ChannelId=100101 计数不变。
-//   全量 64 样本回归：62 放行、b_3767 与原脚本逐字节相同（零副作用）。
-//   模式：CART_MODE = "drop"（删入口+元数据）| "blank"（只清跳转串，布局不动）
+// v1.2.4（2026-11-18）—— 无开关版 + 真正生效：
+//   ★ 根因（设备日志实测）：174 次脚本求值里 134 次 timeout —— 脚本地址是
+//     raw.githubusercontent.com，国内基本拉不下来，8s 超时后 Loon 直接放行原响应，
+//     所以「Tab 没精简、购物车没删」不是解析逻辑的问题，是脚本压根没跑起来。
+//     日志里 [Tab] 一次都没有，[i.video] 全是「未命中广告元素，放行」。
+//     → 插件改用 jsdelivr 地址（国内可达 + 7 天缓存），并把开关全部去掉。
+//   1) 去掉插件页三个开关（diag / tabs / tabvip），代码里钉死：日志开、Tab 开、方案 a；
+//   2) 新增「首页顶栏购物车」清理：它是筛选条模块 mod_category_fliter 的 item_idx=0，
+//      跳转目标就是 tabIndex=21（好物 Tab），所以和 Tab 裁剪是同一件事的两半；
+//   3) 实测：底部 Tab 响应 3783→3767B（短剧/好物 标题清成零宽空格 + 透明图标），
+//      首页导航 41507→41096B（购物车入口 314B + 元数据 97B 删除）。
 // v1.2.2（2026-11-13）—— 抓「客户端重发 getNaviPage」这条线索：
 //   对比三轮日志：v1.1.0（只改标题、不动版本号）底部栏只请求 1 次 → 客户端接受了；
 //   v1.1.1（删项+推版本号）30 次、v1.2.1（空标题+空图标+推版本号）19 次
@@ -846,26 +844,27 @@
     return rebuild(b, s, e, fs, edits);
   }
   const PC_PAGE = utf8("personal_center_page"), AD_FEED = utf8("pb.AdFeed");
-  // ===== 顶栏「购物车」/ 好物筛选入口（eid=filter_ecom_icon）=====
-  // 结构事实（b_41507 实测）：它是模块 mod_category_fliter 的 item_idx=0，分两段：
+  // ===== 首页顶栏「购物车」入口（eid=filter_ecom_icon）=====
+  // 结构事实（b_41507 实测）：它是首页筛选条模块 mod_category_fliter 的 item_idx=0，分两段：
   //   入口段 f7 = { f1: { f1: 2973, f2: { f1: { f1: "txvideo://…tabIndex=21&from_ele=eid=filter_ecom_icon…" } } },
   //                  f3: { f2: { f1:"icon_name", f2:"vmall" } } }
   //   元数据段 f8 = { f1:"filter_icon", f2:[{icon_name:vmall},{item_idx:0},{mod_id:mod_category_fliter},{ztid:100101}] }
-  // 跳转目标就是 tabIndex=21（好物 tab），所以好物 tab 删掉后它必然悬空。
-  // 注意：同模块里搜索框 f2 的 url 也带 from_ele=eid=filter_ecom_icon，不能一起删。
+  // 它的跳转目标就是 tabIndex=21（好物 Tab），所以「好物」被裁掉后它必然悬空。
+  // 注意：同模块里搜索框 f2 的 url 也带 from_ele=eid=filter_ecom_icon（同一条 275B 串），
+  //      只按「含 filter_ecom_icon」删会连搜索框一起干掉；必须再加 icon_name=vmall
+  //      且自身不含 filter_icon 元数据，才能唯一锁定 314B 那条。
   const CART_EID = utf8("filter_ecom_icon");
   const CART_MOD = utf8("mod_category_fliter");
   const CART_ICON = utf8("vmall");
   const CART_META = utf8("filter_icon");
   const CART_URL = utf8("txvideo://");
-  const CART_MODE = "drop"; // "drop"=删入口+元数据 | "blank"=只把跳转链接清空
+  const CART_MODE = "drop"; // "drop"=删入口+紧跟的元数据条目 | "blank"=只清跳转链接
 
   function cartEdit(b, s, e, depth) {
     if (depth > 48) return null;
     const fs = parse(b, s, e);
     if (!fs) return null;
     const edits = new Map();
-    // 入口段：整条就是「eid=filter_ecom_icon + icon_name=vmall」，自己不带 filter_icon 元数据
     const entry = fs.find(x => x.w === 2 && (x.e - x.s) < 4096
       && find(b, CART_EID, x.vs, x.e) >= 0
       && find(b, CART_ICON, x.vs, x.e) >= 0
@@ -878,7 +877,6 @@
         edits.set(x, DROP);
         continue;
       }
-      // 只删「紧跟入口的那条」元数据（item_idx=0 的描述），同层其它 item 不动
       if (entry && CART_MODE === "drop" && x !== entry && (x.e - x.s) < 512
           && find(b, CART_META, x.vs, x.e) >= 0 && find(b, CART_MOD, x.vs, x.e) >= 0
           && fs[i - 1] === entry) {
@@ -931,7 +929,7 @@
     if (cart) {
       indexMarkers(cart, 0, cart.length);
       const c = clean(cart, 0, cart.length, 0);
-      L("购物车", "已处理 " + (e - s) + "→" + cart.length + "B（mode=" + CART_MODE + "）");
+      L("购物车", "入口已处理 " + (e - s) + "→" + cart.length + "B（" + CART_MODE + "）");
       return c || cart;
     }
     return clean(b, s, e, 0);
@@ -977,6 +975,27 @@
     }
     return out;
   }
+  // v1.2.4：getNaviPage 是「增量」接口 —— 客户端带 data_identifier 上来，服务端只回差量
+  // （实测 page_id=home 带标识时只回 927B，整页是 41KB）。购物车/筛选条模块只在整页里，
+  // 所以先把 data_identifier 清空，逼服务端整页下发，再在响应侧动手。
+  // 想省流量就改成 false（但那样已经缓存在本地的购物车不会被清掉）。
+  const FORCE_FULL_NAV = true;
+  function clearNavCache(b, s, e) {
+    const fs = parse(b, s, e);
+    if (!fs) return null;
+    const edits = new Map();
+    for (const x of fs) {
+      if (x.f !== 1 || x.w !== 2) continue;
+      const p = parse(b, x.vs, x.e);
+      if (!p) continue;
+      const k = p.find(z => z.f === 1 && z.w === 2), v = p.find(z => z.f === 2 && z.w === 2);
+      if (!k || !v) continue;
+      if (ascii(b, k.vs, k.e) !== "data_identifier") continue;
+      if (v.e === v.vs) continue;
+      edits.set(x, lenField(1, concat([lenField(1, b.subarray(k.vs, k.e)), lenField(2, new Uint8Array(0))])));
+    }
+    return rebuild(b, s, e, fs, edits);
+  }
   function onTrpcRequest(raw) {
     let u8 = raw, gz = false;
     if (gzMagic(u8)) { u8 = gunzip(u8); gz = true; L("gunzip", "请求体解压后 " + btype(u8)); if (!u8) return null; }
@@ -990,6 +1009,15 @@
       // 诊断用：data_identifier 有值说明客户端本地已经缓存过这页导航数据
       const m = kvOf(u8, fr.he, u8.length);
       L("请求", "getNaviPage page_id=" + (m.page_id || "?") + " data_identifier=" + (m.data_identifier ? m.data_identifier : "(空)"));
+      if (FORCE_FULL_NAV && m.data_identifier) {
+        const nb2 = clearNavCache(u8, fr.he, u8.length);
+        if (nb2) {
+          const out2 = concat([u8.subarray(0, fr.he), nb2]);
+          put32(out2, 4, out2.length);
+          L("请求", "data_identifier 已清空 → 逼服务端整页下发 " + u8.length + "→" + out2.length + "B");
+          return gz ? gzip(out2) : out2;
+        }
+      }
     }
     const hitList = BLOCK_FUNCS.some(x => normFunc(x) === nf);
     const hitRe = BLOCK_RE.test(nf);
@@ -1282,12 +1310,9 @@
     }
     return null;
   }
-  let DBG = (function () {
-    let a = null;
-    try { if (typeof $argument !== "undefined") a = $argument; } catch (e) { a = null; }
-    const v = argFlag(a);
-    return v === null ? DBG_DEFAULT : v;
-  })();
+  // v1.2.4：插件页开关已全部去掉，诊断日志固定开（想静默改成 false）
+  const DIAG_ON = true;
+  let DBG = DIAG_ON;
   // ── 底部 Tab 删除开关（插件页可改，不用动代码）──────────────
   //   tabs=true/false       是否删除底部多余 Tab（false = 导航响应一字节不改）
   //   tabmode=a/b           删哪一组：a=删短剧+好物，b=删VIP会员+好物
@@ -1297,27 +1322,13 @@
   // 「方案 删VIP会员+好物」），而插件页里的开关值只有重装 .lpx 才会回到默认，
   // 这轮只改脚本、不动插件，所以先在代码里把方案钉成 a（短剧+好物）。
   // 以后想用开关，把这里改成 null 即可。
-  const PLAN_FORCE = "a";
-  let TAB_ON = true, TAB_PLAN = TAB_PLANS.a, PARAM_LINE = "";
-  (function () {
-    let a = null;
-    try { if (typeof $argument !== "undefined") a = $argument; } catch (e) { a = null; }
-    TAB_ON = argBool(a, ["tabs", "tab", "tabcut", "tabclean"], true);
-    let m = argRaw(a, ["tabmode", "tabplan", "tabset"]);
-    m = m === null ? "" : String(m).trim().toLowerCase();
-    if (m === "b" || m === "vip" || m === "2") TAB_PLAN = TAB_PLANS.b;
-    else if (m === "a" || m === "short" || m === "smallvideo" || m === "1") TAB_PLAN = TAB_PLANS.a;
-    else if (m) L("参数", "tabmode=" + m + " 无法识别，改看 tabvip 开关");
-    else if (argBool(a, ["tabvip", "tabb"], false)) TAB_PLAN = TAB_PLANS.b;
-    if (TAB_TEST === "cut1") TAB_PLAN = TAB_PLANS.one;
-    if (PLAN_FORCE === "a") TAB_PLAN = TAB_PLANS.a;
-    else if (PLAN_FORCE === "b") TAB_PLAN = TAB_PLANS.b;
-    // 这里不能直接 L()：此时 RID 还没初始化，L 内部取 RID 会抛 TDZ 被静默吞掉。
-    // 先存起来，等真正处理响应时随「入口」一起打出来。
-    PARAM_LINE = "tabs=" + (TAB_ON ? "开" : "关") + " ｜ 方案=" + TAB_PLAN.desc +
-      (PLAN_FORCE ? "（代码强制，插件里的 tabvip 本轮不生效）" : "") +
-      " ｜ 做法=" + (TAB_BLANK ? "清空法（保留槽位，清空标题/图标）" : "删项法");
-  })();
+  // v1.2.4：插件页开关已全部去掉，方案直接钉死。
+  //   TAB_ON  = false 时底部 Tab 一个字节都不改（保留这个常量只为回滚方便）
+  //   TAB_PLAN 可选 TAB_PLANS.a（删短剧+好物）/ .b（删VIP会员+好物）/ .one（只删好物）
+  const TAB_ON = true;
+  const TAB_PLAN = TAB_PLANS.a;
+  const PARAM_LINE = "tabs=" + (TAB_ON ? "开" : "关") + " ｜ 方案=" + TAB_PLAN.desc +
+    " ｜ 做法=" + (TAB_BLANK ? "清空法（保留槽位，清空标题/图标）" : "删项法");
   let RID = "?", STAGE = "初始化";
   function L(stage, msg) {
     if (!DBG && stage !== "错误") return;
