@@ -12,6 +12,23 @@
 //   i.video.qq.com        请求：拦截广告 RPC 调用
 //   iacc.qq.com           JCE 二进制响应：播放提示、贴片广告、暂停广告、青少年弹窗
 //
+// v1.2.6（2026-11-18）—— 换成 QX 参考实现（ZenmoFeiShi/Qx Txvideoad.js）的做法：
+//   参考脚本能真删掉 Tab，它和前面几版的关键差别就三点，本版全部对齐：
+//   1) 删项后**不推版本号 f4**（我们前面每版都在推）；
+//   2) **不重写** f22 里的 item_idx（只重排 f2 顺序号）；
+//   3) **不改** sdk_page_ctx.page_size / 页面级计数。
+//   另外 AB 配置补丁重新打开，并把漏掉的 f2=11276（配置条件号）补上 ——
+//   QX 版就是靠 simple_mode_config 的 tab_bar_cut_whitelist="0;2;4" 让客户端自己裁。
+// v1.2.5（2026-11-18）—— 「图标 404」是 Tab 没被精简的最后一环：
+//   设备日志（1175 次求值）显示脚本这次确实跑起来了：[Tab] 成功 19 次，
+//   每次都在请求后 0.6~2.2s 内完成（不是超时问题）。但客户端每隔几秒就重发
+//   一次 page_id=bottom（16:29:19/23/49/57、16:30:05/26/27/29…），说明它判定
+//   「这页数据不合法」→ 重试 → 最后用本地默认项，所以界面一点没变。
+//   唯一能解释「v1.1.0 只改标题被接受、v1.2.1/v1.2.2 改图标被拒」的差别就是图标：
+//   v1.2.2 指向的 .../assets/blank.png 在仓库里并不存在（jsdelivr 实测 404），
+//   客户端下载不到图 → 整条 item 判废 → 整页重试。
+//   → 本版默认只清标题、保留原图标（客户端已验证会接受）；要连图标一起清，
+//     先把 assets/blank.png（68 字节 1×1 透明 PNG，已随仓库提供）提交上去，再填地址。
 // v1.2.4（2026-11-18）—— 无开关版 + 真正生效：
 //   ★ 根因（设备日志实测）：174 次脚本求值里 134 次 timeout —— 脚本地址是
 //     raw.githubusercontent.com，国内基本拉不下来，8s 超时后 Loon 直接放行原响应，
@@ -146,7 +163,17 @@
   //     19~30 次疯狂重发 getNaviPage —— 那是客户端判定「这页数据不合法」在重试，
   //     重试到最后就用本地缓存/默认项，所以我们改什么都白改。
   const BLANK_TITLE = "\u200b";
-  const BLANK_ICON = "https://cdn.jsdelivr.net/gh/JackLhang/rewrite@main/assets/blank.png";
+  // v1.2.5 关键修正：图标地址**必须能真的下载到**。
+  //   设备实测：v1.2.2 把图标指向 .../assets/blank.png，而仓库里根本没有这个文件
+  //   （jsdelivr 返回 404 "Couldn't find the requested file /assets/blank.png"）。
+  //   日志里 [Tab] 成功了 19 次、每次都在请求后 0.6~2.2s 内完成，但客户端仍然
+  //   每隔几秒重发一次 page_id=bottom —— 它在判定「这页数据不合法」并重试，
+  //   最后用本地默认项，所以标题也没变。对比 v1.1.0 只改标题（图标原样）那次是被接受的，
+  //   差别就在图标：换成下载不到的 URL 就会整条 item 被判废。
+  //   → 默认 BLANK_ICON = ""（不动图标，只清标题，客户端一定接受）。
+  //   → 想连图标一起清掉：先把 tvwork/assets/blank.png 提交到仓库 assets/ 目录，刷 CDN 后
+  //     把下面这行改成 "https://cdn.jsdelivr.net/gh/JackLhang/rewrite@main/assets/blank.png"。
+  const BLANK_ICON = "";
   // 是否在改写后推进版本号（f4）。false = 和 v1.1.0 那次被接受的改名完全对齐。
   const TAB_BUMP_VER = false;
   const ICON_FIELDS = [4, 5, 6, 7, 10, 11, 12, 13, 14, 15];
@@ -157,7 +184,7 @@
     for (const r of fs) {
       if (r.w !== 2) continue;
       if (r.f === 3) ed.set(r, lenField(3, utf8(BLANK_TITLE)));
-      else if (ICON_FIELDS.indexOf(r.f) >= 0) ed.set(r, lenField(r.f, utf8(BLANK_ICON)));
+      else if (BLANK_ICON && ICON_FIELDS.indexOf(r.f) >= 0) ed.set(r, lenField(r.f, utf8(BLANK_ICON)));
     }
     if (!ed.size) return null;
     return rebuild(b, s, e, fs, ed);
@@ -570,6 +597,49 @@
   function tabFix(b, x) {
     if (anyName(b, x.vs, x.e) !== "GetTabListRsp") return null;
     if (!TAB_ON) { L("Tab", "开关已关闭，导航响应一字节不改"); return null; }
+    // ── v1.2.6：QX 版（ZenmoFeiShi/Qx Txvideoad.js）同款做法，逐字节对齐 ──
+    //   1) 命中项的整条 f1 直接删；
+    //   2) 保留项只做一件事：去掉 f2（顺序号 varint）后按新下标重写（idx=0 不写，走默认值）；
+    //   3) **不动** 版本号 f4、**不动** f22 里的 item_idx、**不动** sdk_page_ctx.page_size。
+    //   前面几版删不动，很可能就是多做了这三件事让客户端判废。
+    if (TAB_MODE === "drop") {
+      const r0 = parse(b, ANYV, x.e);
+      const v0 = r0 && r0.find(r => r.f === 2 && r.w === 2);
+      if (!v0) return null;
+      const vf0 = parse(b, v0.vs, v0.e);
+      if (!vf0) return null;
+      const items0 = vf0.filter(r => r.f === 1 && r.w === 2), drop0 = new Set(), name0 = [];
+      for (const it of items0) {
+        const ik = parse(b, it.vs, it.e);
+        if (!ik) return null;
+        let key = "", title = "";
+        for (const r of ik) {
+          if (r.f === 3 && r.w === 2) title = text(b, r.vs, r.e) || "";
+          if (r.f === 22 && r.w === 2) {
+            const rk = parse(b, r.vs, r.e), k1 = rk && rk.find(z => z.f === 1 && z.w === 2);
+            if (k1) key = ascii(b, k1.vs, k1.e) || "";
+          }
+        }
+        name0.push(title || key || "?");
+        if (TAB_PLAN.keys.indexOf(key) >= 0 || TAB_PLAN.titles.indexOf(title) >= 0) drop0.add(it);
+      }
+      if (!drop0.size) { L("Tab", "没匹配到要删的项，当前是：" + name0.join(" / ")); return null; }
+      const ed0 = new Map();
+      let i0 = 0, kept0 = [];
+      for (const it of items0) {
+        if (drop0.has(it)) { ed0.set(it, DROP); continue; }
+        const ik = parse(b, it.vs, it.e), parts = [];
+        if (i0 > 0) parts.push(ev(16), ev(i0));
+        for (const r of ik) if (!(r.f === 2 && r.w === 0)) parts.push(b.subarray(r.s, r.e));
+        ed0.set(it, lenField(1, concat(parts)));
+        kept0.push(name0[items0.indexOf(it)]);
+        i0++;
+      }
+      const nv0 = rebuild(b, v0.vs, v0.e, vf0, ed0);
+      if (!nv0) return null;
+      L("Tab", "删项（QX 做法）：删 " + drop0.size + " 个（" + name0.filter((n, i) => drop0.has(items0[i])).join(" / ") + "），留 " + kept0.join(" / ") + "；版本号/计数/item_idx 一律不动");
+      return lenField(x.f, concat([b.subarray(x.vs, v0.s), lenField(2, nv0), b.subarray(v0.e, x.e)]));
+    }
     const rest = parse(b, ANYV, x.e);
     const v = rest && rest.find(r => r.f === 2 && r.w === 2);
     if (!v) return null;
@@ -639,7 +709,7 @@
       }
       const nvB = rebuild(b, v.vs, v.e, vf, edsB);
       if (!nvB) return null;
-      L("Tab", "清空法：" + hitsB.join(" / ") + " 的标题(零宽空格)与图标(透明图)已替换；5 个槽位、id、顺序、计数全不动" +
+      L("Tab", "清空法：" + hitsB.join(" / ") + " 的标题(零宽空格)" + (BLANK_ICON ? "与图标(透明图)" : "已替换，图标保留") + "；5 个槽位、id、顺序、计数全不动" +
         (verTxtB ? "，版本 " + verTxtB + "→" + newVerB : "，版本号不动"));
       return lenField(x.f, concat([b.subarray(x.vs, v.s), lenField(2, nvB), b.subarray(v.e, x.e)]));
     }
@@ -1327,6 +1397,8 @@
   //   TAB_PLAN 可选 TAB_PLANS.a（删短剧+好物）/ .b（删VIP会员+好物）/ .one（只删好物）
   const TAB_ON = true;
   const TAB_PLAN = TAB_PLANS.a;
+  // "drop" = 直接删项（QX 同款，v1.2.6 默认）；"blank" = 清空法（保留槽位，改成图标/标题空白）
+  const TAB_MODE = "drop";
   const PARAM_LINE = "tabs=" + (TAB_ON ? "开" : "关") + " ｜ 方案=" + TAB_PLAN.desc +
     " ｜ 做法=" + (TAB_BLANK ? "清空法（保留槽位，清空标题/图标）" : "删项法");
   let RID = "?", STAGE = "初始化";
@@ -1426,7 +1498,9 @@
   }
   // 服务端条目格式实测为 {f1:key, f2:{f1:json, f4:key}}，这里照抄，不额外塞字段
   function simpleModeEntry() {
-    const v = concat([lenField(1, utf8(simpleModeJson())), lenField(4, utf8(SIMPLE_KEY))]);
+    // QX 版这里多一个 f2 = 11276（配置条件/实验号）；之前 Loon 版漏了它，
+    // 补上去才和参考实现完全一致。
+    const v = concat([lenField(1, utf8(simpleModeJson())), ev(16), ev(11276), lenField(4, utf8(SIMPLE_KEY))]);
     return concat([lenField(1, utf8(SIMPLE_KEY)), lenField(2, v)]);
   }
   function patchNoQuic(js) {
@@ -1455,7 +1529,7 @@
   // 六轮实测一次都没让底部栏少过一个 Tab。而它带 check_sum，改内容/推版本号等于让
   // 客户端校验不过，反而可能把整份 AB 配置丢掉（开屏突然出现就是在这之后）。
   // 想再试就把它改成 true，并把 .lpx 里的 AB 规则加回来。
-  const AB_FIX = false;
+  const AB_FIX = true; // v1.2.6：按 QX 参考实现重新打开（缺的 f2=11276 已补）
   const AB_PATCH = {
     simple_mode_config: patchSimpleMode,
     ios_nx_netframework_compatible: patchNoQuic,
