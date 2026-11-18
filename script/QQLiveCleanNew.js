@@ -12,6 +12,17 @@
 //   i.video.qq.com        请求：拦截广告 RPC 调用
 //   iacc.qq.com           JCE 二进制响应：播放提示、贴片广告、暂停广告、青少年弹窗
 //
+// v1.2.7（2026-11-18）—— 补上 QX 漏掉的那一步：page_size 跟删完的个数对齐。
+//   设备实测证据链（用户两张截图 + 最新日志）：
+//   ① 14:17 那张图里第 4 个 Tab 的字样是「好物·改」—— 那是诊断用的改名测试，
+//      说明**标题由这条响应说了算**，客户端也确实应用了我们的改写（只改标题 = 被接受）；
+//   ② 15:36 之后那几张图底部变成 短视频/VIP会员/好物/我的 —— 这是**客户端本地默认项**，
+//      说明结构一动（删项/清空）它就把整页判废、回落到默认；
+//   ③ 最新日志里每次启动都会在几秒内连发 4~6 次 page_id=bottom，随后界面回默认 ——
+//      典型「说好给 N 个，只给了 M<N 个」的重试。
+//   原响应 sdk_page_ctx={"page_offset":1,"page_size":5,...}，5 正好等于 5 个 Tab；
+//   QX 版删完只剩 3 个却不动 page_size，本版把它同步成 3（其余与 QX 逐字节一致）。
+//   顺带把 AB 顶层配置版本也改回「原样不动」（QX 就是这么做的）。
 // v1.2.6（2026-11-18）—— 换成 QX 参考实现（ZenmoFeiShi/Qx Txvideoad.js）的做法：
 //   参考脚本能真删掉 Tab，它和前面几版的关键差别就三点，本版全部对齐：
 //   1) 删项后**不推版本号 f4**（我们前面每版都在推）；
@@ -637,7 +648,14 @@
       }
       const nv0 = rebuild(b, v0.vs, v0.e, vf0, ed0);
       if (!nv0) return null;
-      L("Tab", "删项（QX 做法）：删 " + drop0.size + " 个（" + name0.filter((n, i) => drop0.has(items0[i])).join(" / ") + "），留 " + kept0.join(" / ") + "；版本号/计数/item_idx 一律不动");
+      // v1.2.7：把「实际剩几个」交给页面级计数修正（sdk_page_ctx.page_size）。
+      //   原响应里 page_size 恰好等于 Tab 个数（两个样本 5 项 / page_size=5）。
+      //   只删项不同步 page_size，客户端会认为「说好 5 个只给了 3 个」→ 判不完整、
+      //   连续重发 page_id=bottom，最后回落到本地默认 5 项 —— 就是日志里每启动
+      //   4~5 次 bottom 请求、界面却回默认（短视频/VIP会员/我的）的原因。
+      TAB_KEPT = i0;
+      TAB_OLD = items0.length;
+      L("Tab", "删项（QX 做法）：删 " + drop0.size + " 个（" + name0.filter((n, i) => drop0.has(items0[i])).join(" / ") + "），留 " + kept0.join(" / ") + "；版本号/item_idx 不动，page_size " + TAB_OLD + "→" + TAB_KEPT);
       return lenField(x.f, concat([b.subarray(x.vs, v0.s), lenField(2, nv0), b.subarray(v0.e, x.e)]));
     }
     const rest = parse(b, ANYV, x.e);
@@ -1530,6 +1548,10 @@
   // 客户端校验不过，反而可能把整份 AB 配置丢掉（开屏突然出现就是在这之后）。
   // 想再试就把它改成 true，并把 .lpx 里的 AB 规则加回来。
   const AB_FIX = true; // v1.2.6：按 QX 参考实现重新打开（缺的 f2=11276 已补）
+  // v1.2.7：和 QX 逐字节对齐 —— QX 不改顶层配置版本，我们也不改。
+  //   客户端拿 f2 当版本号比缓存，突然跳到现在的时间戳反而可能被判「来源不明」；
+  //   先按参考实现原样走，AB 这条路只有在对齐后才谈得上「生效/不生效」。
+  const AB_BUMP_VER = false;
   const AB_PATCH = {
     simple_mode_config: patchSimpleMode,
     ios_nx_netframework_compatible: patchNoQuic,
@@ -1573,6 +1595,7 @@
       L("AB", "下发里没有 " + SIMPLE_KEY + "，已补一条：tab_bar_cut_enable=1 whitelist=" + cutWhitelist() + "，" + u8.length + "→" + out.length + "B");
     }
     if (!out) { L("AB", "没有可补丁的条目，放行 " + u8.length + "B"); return null; }
+    if (!AB_BUMP_VER) { L("AB", "配置版本保持原样（与 QX 一致），" + u8.length + "→" + out.length + "B"); return gz ? gzip(out) : out; }
     // 顶层 f2 = 配置版本（时间戳）。客户端很可能拿它跟本地缓存比对，
     // 版本没变就整份不应用 —— 所以改过内容就一定把版本推到「现在」。
     const to2 = parse(out, 0, out.length);
